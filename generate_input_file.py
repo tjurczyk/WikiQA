@@ -6,78 +6,99 @@ from os import makedirs
 from pprint import pprint
 from representation.wordrepresentation import Word2VecModel as w2vec
 from representation.question import Question
+from decomposition.sentence import get_sentence_words
+from collections import defaultdict
+import numpy as np
+import logging
 
 import globals
 
-# Option for cutting sentence vector list
-# (so, if s_size is 40, but sentence is 44, first 40 tokens will be taken)
-s_cut = True
+logger = logging.getLogger("wikiqa.generation")
 
 # Settings for validation of file
 # depth = 2
 
-vec = w2vec()
-data_set_path = None
+q_limit = None
 
 
 def experiment():
+
     # List for samples (one sample is ibe
-    samples = []
-    labels = []
 
-    questions = load_questions_from_file(globals.gen_mode, globals.q_limit)
+    vocabulary = defaultdict(float)
+    questions = {}
 
-    globals.logger.info("Generating input from questions...")
-    counter = 1
+    questions['train'], voc, idf = load_questions_from_file('train', q_limit, vocabulary)
+    questions['validate'], voc, idf = load_questions_from_file('validate', q_limit, vocabulary)
+    questions['test'], voc, idf = load_questions_from_file('test', q_limit, vocabulary)
+    logging.info("Questions loaded.")
 
-    for q in questions:
-        # Create a question vector
-        q_repr = get_sentence_vector_list(q.question)
-        labels_q = []
+    word2vec = w2vec(vocabulary)
 
-        for idx, a in enumerate(q.answers):
-            a_repr = get_sentence_vector_list(a)
+    for question_set in ["train", "validate", "test"]:
+        logger.info("Now working for set: %s" % question_set)
 
-            labels_q.append(int(idx == q.correct_answer))
-            samples.append(generate_sample(q_repr, a_repr))
+        counter = 1
+        samples = []
+        labels = []
 
-        labels.append(labels_q)
-        sys.stdout.write("\rQuestions parsed: %d/%s" % (counter, globals.q_limit if globals.q_limit > -1 else "all"))
+        for q in questions[question_set]:
+            # Create a question vector
+            q_sampled = get_sentence_vector_list(q.question, word2vec)
+            labels_q = []
+
+            for idx, a in enumerate(q.answers):
+                a_sampled = get_sentence_vector_list(a, word2vec)
+
+                labels_q.append(int(idx == q.correct_answer))
+                #print("\nAdding sample\n")
+                samples.append(generate_sample(q_sampled, a_sampled))
+
+            labels.append(labels_q)
+            sys.stdout.write("\rQuestions parsed: %d/%s" % (counter, q_limit if q_limit > -1 else "all"))
+            sys.stdout.flush()
+            counter += 1
+
+        sys.stdout.write("\n")
         sys.stdout.flush()
-        counter += 1
-        #print q
+        logger.info("Input generated for %s" % question_set)
 
-    sys.stdout.write("\n")
-    sys.stdout.flush()
-    globals.logger.info("Input generated.")
+        (map_valid, error_index) = validate_feature_map(samples)
+        if map_valid is False:
+            raise ValueError("Feature map is not symmetrical (matrix) and so cannot be used. "
+                             "Indexes of error: " + str(error_index))
 
-    (map_valid, error_index) = validate_feature_map(samples)
-    if map_valid is False:
-        raise ValueError("Feature map is not symmetrical (matrix) and so cannot be used. "
-                         "Indexes of error: " + str(error_index))
-
-    globals.logger.info("Dumping features and labels...")
-    f_samples = open(data_set_path + globals.nn_features_file, "wb")
-    pickle.dump(samples, f_samples)
-    f_samples.close()
-
-    f_labels = open(data_set_path + globals.nn_labels_file, "wb")
-    pickle.dump(labels, f_labels)
-    f_labels.close()
-
-    #pprint(samples)
-    #pprint(labels)
-    #pprint(samples)
-    print "samples size = " + str(len(samples))
+        data_set_path = globals.data_path + question_set + "."
+        data_set_path += str(q_limit) if q_limit > -1 else "all"
+        data_set_path += "/"
 
 
-def load_questions_from_file(mode, q_limit):
+        if not exists(data_set_path):
+            makedirs(data_set_path)
+
+        logger.info("Dumping features and labels...")
+        f_samples = open(data_set_path + globals.nn_features_file, "wb")
+        pickle.dump(samples, f_samples)
+        f_samples.close()
+
+        f_labels = open(data_set_path + globals.nn_labels_file, "wb")
+        pickle.dump(labels, f_labels)
+        f_labels.close()
+
+        print "samples size for: %s is: %d" % (question_set, len(samples))
+
+
+def load_questions_from_file(mode, q_limit, vocabulary=None):
     questions = []
+    n = 0
+    idf = defaultdict(float)
+    if vocabulary is None:
+        vocabulary = defaultdict(float)
+    else:
+        print("Vocabulary passed")
 
     with open(globals.input_files.get(mode)) as f:
-        # Forward one line (header)
-        next(f)
-        question_id = None
+        question_text = None
         question = None
         parsed_questions = 0
         answers_count = 0
@@ -85,28 +106,47 @@ def load_questions_from_file(mode, q_limit):
         for line in f:
             split_line = line.rstrip().split('\t')
 
-            # New question if current line's question id is different than previous
-            is_new_question = question_id != split_line[0]
-
-            if is_new_question:
-                if question_id:
-                    questions.append(question)
-                    parsed_questions += 1
-                    if -1 < q_limit == parsed_questions:
-                        break
-
-                question_id = split_line[0]
-                answers_count = 0
-                question = Question(split_line[0], split_line[3], split_line[1], [split_line[5], ])
+            # If new question (but not the first one)
+            if question_text is not None and question_text != split_line[0]:
+                is_new_question = True
+                questions.append(question)
+                parsed_questions += 1
             else:
-                question.add_answer(split_line[5])
+                is_new_question = False
 
-            if split_line[6] == "1":
+            # If there was a limit, break if reached
+            if -1 < parsed_questions == q_limit:
+                break
+
+            question_text = split_line[0]
+
+            # Number of samples/documents
+            n += 1
+
+            # Add to vocabulary
+            words_set = set(get_sentence_words(split_line[0]))
+            words_set.update(get_sentence_words(split_line[1]))
+            for word in words_set:
+                vocabulary[word] += 1
+
+            # If new question entity
+            if is_new_question or question is None:
+                answers_count = 0
+                question = Question(split_line[0], split_line[1])
+            else:
+                question.add_answer(split_line[1])
+
+            # Add answer if found
+            if split_line[2] == "1":
                 question.add_correct_answer(answers_count)
 
             answers_count += 1
 
-    return questions
+    # Calculate idf
+    for k, v in vocabulary.items():
+        idf[k] = np.log(n / vocabulary[k])
+
+    return questions, vocabulary, idf
 
 
 def validate_feature_map(f_map):
@@ -201,44 +241,44 @@ def pad_with_zeroes(s, length=globals.s_size):
     return padded
 
 
-def get_sentence_vector_list(s):
+def get_sentence_vector_list(s, word2vec):
     """
     :rtype :list
     """
 
     s_repr = []
-    for j in s.split(" "):
-        word = ''.join(e for e in j if e.isalnum())
-        if word != "" and word.lower() not in globals.stop_words and word.lower() not in globals.p_marks:
-            s_repr_word = vec.get_word_vec(word)
-            if s_repr_word is not None:
-                #print ("Getting wordvec of: %s, first elem: %s" % (word, s_repr_word[0]))
-                s_repr.append(s_repr_word)
 
-    if len(s_repr) > globals.s_size and not s_cut:
-        raise ValueError("Size of sentence (q or a) exceeds s_size. (" + str(len(s_repr))
-                         + ">" + str(globals.s_size) + ")")
+    for word in get_sentence_words(s):
+        if word not in globals.p_marks:
+            s_repr_word = word2vec.get_word_vec(word)
+            #print ("Getting wordvec of: %s, first elem: %s" % (word, s_repr_word[0]))
+            s_repr.append(s_repr_word)
 
     return s_repr[:globals.s_size]
 
 
 def get_config():
-    config = {"data_set_path": data_set_path}
+    config = {"q_limit": str(q_limit) if q_limit > -1 else "all"}
     return config
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+
     if globals.gen_mode is None:
         raise ValueError("Generation mode is None (run with -g)")
 
-    data_set_path = globals.data_path \
-                 + globals.gen_mode + "."
-    data_set_path += str(globals.q_limit) if globals.q_limit > -1 else "all"
-    data_set_path += "/"
+    if not globals.options.q_limit:
+        q_limit = -1
+    else:
+        q_limit = int(globals.options.q_limit)
 
-    if not exists(data_set_path):
-        makedirs(data_set_path)
+    # data_set_path = globals.data_path \
+    #              + globals.gen_mode + "."
+    # data_set_path += str(q_limit) if q_limit > -1 else "all"
+    # data_set_path += "/"
 
-    pprint(get_config())
-    vec.load_model()
+    print("Generation mode options:")
+    p_order = ['q_limit']
+    print(globals.get_printy_dict(get_config(), p_order))
     experiment()
