@@ -14,6 +14,8 @@ batch_size = 20
 learning_margin = 0.0003
 validation_mode = "validation_data"
 
+normalize_numbers = False
+
 # Sentence Tools options
 # These settings are set up based on experiments
 words_count = False
@@ -87,8 +89,14 @@ input_files = {'train': 'WikiQA_data/WikiQASent-train.txt',
                'validate': 'WikiQA_data/WikiQASent-dev.txt',
                'all': 'WikiQA_data/WikiQA.tsv'}
 
-from stop_words import get_stop_words
-stop_words = set(get_stop_words('en'))
+#from stop_words import get_stop_words
+#stop_words = set(get_stop_words('en'))
+
+stop_words = set()
+for l in open('short-stopwords.txt').readlines():
+    stop_words.add(l.strip())
+
+print("Stopwords: %s" % stop_words)
 
 from string import punctuation
 p_marks = set(punctuation)

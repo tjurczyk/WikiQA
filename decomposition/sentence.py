@@ -56,15 +56,13 @@ def decompose_question(question_entity):
         wo_idf = get_occurrence_items_idf(question_words, answer_words)
         idf_sum += wo_idf
 
-        sample = [wo, wo_idf, q_length, wo_answers]
+        sample = [wo, wo_idf, q_length,] #wo_answers]
         samples.append(sample)
-
-
 
     idf_average = float(idf_sum)/len(question_entity.answers)
 
-    for sample in samples:
-        sample.extend([idf_average, sample[1]/idf_average if sample[1] != 0.0 else 0])
+    #for sample in samples:
+    #    sample.extend([idf_average, sample[1]/idf_average if sample[1] != 0.0 else 0])
 
     #print("samples:")
     #pprint(samples)
@@ -88,6 +86,22 @@ def get_sentence_words(sentence):
     string = string.strip().lower()
 
     return string.split()
+
+
+def get_normalized_numbers(l_words):
+    norm_words = []
+
+    for word in l_words:
+        if contains_digits(word):
+            norm_words.append(re.sub("\d", "0", word))
+
+    return norm_words
+
+_digits = re.compile('\d')
+
+
+def contains_digits(d):
+    return bool(_digits.search(d))
 
 
 def get_occurrence_items(s1, s2):

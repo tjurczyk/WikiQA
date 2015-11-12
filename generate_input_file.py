@@ -6,10 +6,11 @@ from os import makedirs
 from pprint import pprint
 from representation.wordrepresentation import Word2VecModel as w2vec
 from representation.question import Question
-from decomposition.sentence import get_sentence_words
+from decomposition.sentence import get_sentence_words, get_normalized_numbers
 from collections import defaultdict
 import numpy as np
 import logging
+import re
 
 import globals
 
@@ -33,7 +34,7 @@ def experiment():
     questions['test'], voc, idf = load_questions_from_file('test', q_limit, vocabulary)
     logging.info("Questions loaded.")
 
-    word2vec = w2vec(vocabulary)
+    word2vec = w2vec(vocabulary, filename='../GoogleNews-vectors-negative300.bin')
 
     for question_set in ["train", "validate", "test"]:
         logger.info("Now working for set: %s" % question_set)
@@ -65,8 +66,7 @@ def experiment():
 
         (map_valid, error_index) = validate_feature_map(samples)
         if map_valid is False:
-            raise ValueError("Feature map is not symmetrical (matrix) and so cannot be used. "
-                             "Indexes of error: " + str(error_index))
+            raise ValueError("Feature map is not symmetrical (matrix) and so cannot be used. Indexes of error: " + str(error_index))
 
         data_set_path = globals.data_path + question_set + "."
         data_set_path += str(q_limit) if q_limit > -1 else "all"
@@ -128,6 +128,12 @@ def load_questions_from_file(mode, q_limit, vocabulary=None):
             words_set.update(get_sentence_words(split_line[1]))
             for word in words_set:
                 vocabulary[word] += 1
+
+            # If Word2Vec will use normalized numbers (0000),
+            # update vocabulary with them
+            if globals.normalize_numbers is True:
+                    for i in get_normalized_numbers(words_set):
+                        vocabulary[i] += 1
 
             # If new question entity
             if is_new_question or question is None:
@@ -250,8 +256,12 @@ def get_sentence_vector_list(s, word2vec):
 
     for word in get_sentence_words(s):
         if word not in globals.p_marks:
-            s_repr_word = word2vec.get_word_vec(word)
-            #print ("Getting wordvec of: %s, first elem: %s" % (word, s_repr_word[0]))
+            if globals.normalize_numbers is True:
+                #print("Extracting from word2vec word: %s" % re.sub("\d", "0", word))
+                s_repr_word = word2vec.get_word_vec(re.sub("\d", "0", word))
+            else:
+                s_repr_word = word2vec.get_word_vec(word)
+
             s_repr.append(s_repr_word)
 
     return s_repr[:globals.s_size]

@@ -11,6 +11,7 @@ from generate_input_file import load_questions_from_file
 from decomposition.sentence import decompose_questions, build_idf
 from sklearn.linear_model import LogisticRegression
 from random import randint
+from random import shuffle
 from sklearn import svm
 import sys
 
@@ -257,8 +258,9 @@ def test_model(model, X_test, y_test):
 
 
 def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
-    #model = get_ngram_model()
-    model = get_regular_model()
+    model = get_ngram_model()
+    #model = get_regular_model()
+    #model = get_regular_model_with_logistic()
 
     y_train_flatted = list(itertools.chain(*y_train))
     y_validate_flatted = list(itertools.chain(*y_validate))
@@ -280,24 +282,40 @@ def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
     samples_validate = decompose_questions(questions_validate)
     samples_test = decompose_questions(questions_test)
 
+    print("len of X_train: %d and samples_train: %d" % (len(X_train), len(samples_train)))
+
+    # Section for Logistic integrated in NN
+    #samples_train_shaped = array(samples_train).reshape(len(samples_train), 1, 1, 6)
+    #samples_validate_shaped = array(samples_validate).reshape(len(samples_validate), 1, 1, 6)
+    #samples_test_shaped = array(samples_test).reshape(len(samples_test), 1, 1, 6)
+
     for e in range(nb_epoch):
         print("Epoch %d" % e)
         progress_bar = generic_utils.Progbar(X_train.shape[0])
+
+        # For training NN, shuffle the data
+        X_train_shuffled, y_train_shuffled = shuffleSet(X_train, y_train_flatted)
+        #X_train_shuffled, y_train_shuffled = shuffle_and_sample(X_train, y_train_flatted, 10001)
+
+        #nb_batch = len(X_train_shuffled)/batch_size + 1
+
+        #progress_bar = generic_utils.Progbar(X_train_shuffled.shape[0])
+
         for i in range(nb_batch):
-            train_loss,train_accuracy = model.train_on_batch(X_train[i*batch_size:(i+1)*batch_size],
-                                                             y_train_flatted[i*batch_size:(i+1)*batch_size],
+            train_loss,train_accuracy = model.train_on_batch([X_train_shuffled[i*batch_size:(i+1)*batch_size],]*4,
+                                                             y_train_shuffled[i*batch_size:(i+1)*batch_size],
                                                              accuracy=True)
             progress_bar.add(batch_size, values=[("train loss", train_loss),("train accuracy:", train_accuracy)])
 
         # Check the score on the validation data
-        results_val = test_model(model, X_validate, y_validate)
+        results_val = test_model(model, [X_validate, ]*4, y_validate)
         best_threshold = find_threshold(y_validate, results_val["y_predicted_scores"], results_val["y_predicted_scores"])
         precision_val, recall_val, f1_val = evaluate_with_threshold(y_validate, results_val["y_predicted_scores"],
                                                                     results_val["y_predicted_scores"],
                                                                     best_threshold)
 
         # Check the score on the test data
-        results_test = test_model(model, X_test, y_test)
+        results_test = test_model(model, [X_test, ]*4, y_test)
         precision_test, recall_test, f1_test = evaluate_with_threshold(y_test, results_test["y_predicted_scores"],
                                                                        results_test["y_predicted_scores"],
                                                                        best_threshold)
@@ -315,9 +333,9 @@ def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
                                          precision_test, recall_test, f1_test))
 
         # Now try with logistic regression
-        predictions_train = model.predict(X_train)
-        predictions_validate = model.predict(X_validate)
-        predictions_test = model.predict(X_test)
+        predictions_train = model.predict([X_train, ]*4)
+        predictions_validate = model.predict([X_validate, ]*4)
+        predictions_test = model.predict([X_test, ]*4)
 
         # Evaluate on logistic regression
         precision, recall, f1 = validate_on_lr(samples_train, samples_validate, samples_test,
@@ -335,6 +353,53 @@ def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
 
     globals.logger.info("Training done, best f1 on logistic regression is: %.4f for epoch nr: %d" %
                    (best_f1, best_f1_index))
+
+
+def shuffle_and_sample(X, y, n=10000):
+    length = len(X)
+
+    X_sampled, y_sampled = [], []
+
+    y_ones_indexes = [idx for idx, x in enumerate(y) if x == 1]
+    y_ones_indexes_set = set(y_ones_indexes)
+    X_ones = [i for idx, i in enumerate(X) if idx in y_ones_indexes]
+
+    # random n negative samples
+
+    sampled = 0
+    while True:
+        randomized = randint(0, length-1)
+        if randomized not in y_ones_indexes_set:
+            X_sampled.append(X[randomized])
+            y_sampled.append(0)
+            sampled += 1
+
+        if sampled == n - len(y_ones_indexes):
+            break
+
+    # Add true (1) samples
+    X_sampled.extend(X_ones)
+    y_sampled.extend([1] * len(X_ones))
+
+    # And shuffle
+    X_shuffled, y_shuffled = shuffleSet(X_sampled, y_sampled)
+
+    return X_shuffled, y_shuffled
+
+
+def shuffleSet(X, y):
+    if len(X) != len(y):
+        raise ValueError("Lengths of X and y don't match")
+
+    X_shuffled = []
+    y_shuffled = []
+    index_shuffled = range(len(X))
+    shuffle(index_shuffled)
+    for i in index_shuffled:
+        X_shuffled.append(X[i])
+        y_shuffled.append(y[i])
+
+    return array(X_shuffled), array(y_shuffled)
 
 
 def get_regular_model():
@@ -356,8 +421,37 @@ def get_regular_model():
     return model
 
 
+def get_regular_model_with_logistic():
+    nn_layer = Sequential()
+    nn_layer.add(Convolution2D(globals.nb_filters, 1, 2, globals.dimension))
+    nn_layer.add(Activation('tanh'))
+
+    nn_layer.add(extras.AveragePooling2D(poolsize=(globals.s_size, 1)))
+
+    nn_layer.add(Flatten())
+
+    nn_layer.add(Dense(2*globals.nb_filters, 1))
+
+    #nn_layer.add(Activation('sigmoid'))
+
+    lr_layer = Sequential()
+    lr_layer.add(Dense(6, 6))
+    #lr_layer.add(Activation('linear'))
+
+    model = Sequential()
+    model.add(Merge([nn_layer, lr_layer], mode='concat'))
+    model.add(Dense(7, 1))
+    model.add(Activation('sigmoid'))
+
+
+    globals.logger.info("Compiling model...")
+    model.compile(loss='binary_crossentropy', optimizer='Adagrad', class_mode="binary")
+    globals.logger.info("Model compiled, start training...")
+    return model
+
+
 def get_ngram_model():
-    ngram_filters = [2, 3]
+    ngram_filters = [2, 3, 4, 5]
     conv_filters = []
 
     for n_gram in ngram_filters:
@@ -405,11 +499,15 @@ def train(X_train, y_train, X_validate, y_validate, validation_mode):
 
     model.add(extras.AveragePooling2D(poolsize=(globals.s_size,1)))
 
+    model.add(Dropout(0.25))
+
     model.add(Flatten())
 
     model.add(Dense(2*globals.dimension, 1))
 
     model.add(Activation('sigmoid'))
+
+    model.add(Dropout(0.5))
 
     globals.logger.info("Compiling model...")
     model.compile(loss='binary_crossentropy', optimizer='Adagrad', class_mode="binary")

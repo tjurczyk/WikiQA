@@ -42,8 +42,11 @@ class Word2VecModel:
         print("num words already in word2vec: %d" % len(word_vectors))
         print("vocabulary size: %d" % len(vocabulary))
 
-        # print("word vector of 'formed': ")
-        # print(word_vectors['formed'].tolist())
+        print("word vector of 'formed': ")
+        print(word_vectors['formed'].tolist())
+
+        #print("word vector of '0000': ")
+        #print(word_vectors['0000'].tolist())
         #print(",".join(word_vectors['formed']))
 
         return word_vectors
