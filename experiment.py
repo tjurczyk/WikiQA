@@ -182,7 +182,7 @@ def test_lr():
 def test_lr_on_data(X_train, y_train, X_validate, y_validate, X_test, y_test):
     y_train_flatten = list(itertools.chain(*y_train))
 
-    lr = LogisticRegression(solver='lbfgs')#, class_weight={1: 0.2})#)#solver='lbfgs', class_weight={1: 0.5})
+    lr = LogisticRegression(solver='lbfgs')#, class_weight={1: 0.9})#)#solver='lbfgs', class_weight={1: 0.5})
     lr.fit(X_train, y_train_flatten)
 
     ######################################################
@@ -209,6 +209,7 @@ def test_lr_on_data(X_train, y_train, X_validate, y_validate, X_test, y_test):
     predictions_test = lr.predict_proba(X_test)
     predictions_test = array([i[-1] for i in predictions_test])
     #confidence_test = lr.decision_function(X_test)
+    #print_logistic_predictions(predictions_test, y_test[:30])
     precision, recall, f1 = evaluate_with_threshold(y_test, predictions_test, predictions_test, best_threshold)
 
     return precision, recall, f1
@@ -258,8 +259,8 @@ def test_model(model, X_test, y_test):
 
 
 def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
-    model = get_ngram_model()
-    #model = get_regular_model()
+    #model = get_ngram_model()
+    model = get_regular_model()
     #model = get_regular_model_with_logistic()
 
     y_train_flatted = list(itertools.chain(*y_train))
@@ -302,20 +303,20 @@ def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
         #progress_bar = generic_utils.Progbar(X_train_shuffled.shape[0])
 
         for i in range(nb_batch):
-            train_loss,train_accuracy = model.train_on_batch([X_train_shuffled[i*batch_size:(i+1)*batch_size],]*4,
+            train_loss,train_accuracy = model.train_on_batch(X_train_shuffled[i*batch_size:(i+1)*batch_size],
                                                              y_train_shuffled[i*batch_size:(i+1)*batch_size],
                                                              accuracy=True)
             progress_bar.add(batch_size, values=[("train loss", train_loss),("train accuracy:", train_accuracy)])
 
         # Check the score on the validation data
-        results_val = test_model(model, [X_validate, ]*4, y_validate)
+        results_val = test_model(model, X_validate, y_validate)
         best_threshold = find_threshold(y_validate, results_val["y_predicted_scores"], results_val["y_predicted_scores"])
         precision_val, recall_val, f1_val = evaluate_with_threshold(y_validate, results_val["y_predicted_scores"],
                                                                     results_val["y_predicted_scores"],
                                                                     best_threshold)
 
         # Check the score on the test data
-        results_test = test_model(model, [X_test, ]*4, y_test)
+        results_test = test_model(model, X_test, y_test)
         precision_test, recall_test, f1_test = evaluate_with_threshold(y_test, results_test["y_predicted_scores"],
                                                                        results_test["y_predicted_scores"],
                                                                        best_threshold)
@@ -333,9 +334,9 @@ def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
                                          precision_test, recall_test, f1_test))
 
         # Now try with logistic regression
-        predictions_train = model.predict([X_train, ]*4)
-        predictions_validate = model.predict([X_validate, ]*4)
-        predictions_test = model.predict([X_test, ]*4)
+        predictions_train = model.predict(X_train)
+        predictions_validate = model.predict(X_validate)
+        predictions_test = model.predict(X_test)
 
         # Evaluate on logistic regression
         precision, recall, f1 = validate_on_lr(samples_train, samples_validate, samples_test,
@@ -744,6 +745,19 @@ def test_nn_logistic():
     X_test, y_test = load_data(test_data, globals.nn_features_file, globals.nn_labels_file)
 
     train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test)
+
+
+def print_logistic_predictions(y_predictions, y_gold):
+    index_begin = 0
+
+    for question_set in y_gold:
+
+        print("Question:")
+
+        for i in xrange(len(question_set)):
+            print("%s %s" % (str(y_predictions[index_begin+i]).ljust(20, " "), question_set[i]))
+
+        index_begin += len(question_set)
 
 
 def test_idf_build():
