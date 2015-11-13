@@ -579,10 +579,10 @@ def train(X_train, y_train, X_validate, y_validate, validation_mode):
 
 def new_find_threshold(questions_gold_sets, predictions, confidence):
 
-    thr = 0.05
+    thr = 0.02
     best_f1 = -1
     best_f1_thr = -1
-    while thr < 0.16:
+    while thr < 0.40:
         precision, recall, f1 = evaluate_with_threshold(questions_gold_sets, predictions, confidence, thr)
         if f1 > best_f1:
             best_f1 = f1
@@ -697,6 +697,8 @@ def evaluate_with_threshold(questions_gold_sets, predictions, confidence, thresh
 
         # Find the maximum value prediction
         max_val_index = numpy.argmax(predictions_slice)
+        if len(numpy.argwhere(predictions_slice == predictions_slice[max_val_index])) > 1:
+            raise ValueError("More than one max values in slice!")
 
         if confidence_slice[max_val_index] > threshold:
             predicted_answer = max_val_index

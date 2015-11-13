@@ -78,11 +78,11 @@ def experiment():
 
         logger.info("Dumping features and labels...")
         f_samples = open(data_set_path + globals.nn_features_file, "wb")
-        pickle.dump(samples, f_samples)
+        pickle.dump(samples, f_samples, protocol=2)
         f_samples.close()
 
         f_labels = open(data_set_path + globals.nn_labels_file, "wb")
-        pickle.dump(labels, f_labels)
+        pickle.dump(labels, f_labels, protocol=2)
         f_labels.close()
 
         print "samples size for: %s is: %d" % (question_set, len(samples))
