@@ -16,11 +16,6 @@ validation_mode = "validation_data"
 
 normalize_numbers = False
 
-# Sentence Tools options
-# These settings are set up based on experiments
-words_count = False
-stemming = False
-
 # NN settings
 pooling_mode = 'average_exc_pad'
 
@@ -36,8 +31,6 @@ parser.add_option("--test", help="test data location (experiment mode)", dest="t
 parser.add_option("--nb_epoch", help="number of epochs (experiment mode)", dest="nb_epoch")
 parser.add_option("--batch_size", help="batch size (experiment mode)", dest="batch_size")
 parser.add_option("--validation_mode", help="validation mode (experiment mode)", dest="validation_mode")
-parser.add_option("--words_count", help="words count (for sentence tools)", dest="words_count")
-parser.add_option("--stemming", help="stemming (for sentence tools)", dest="stemming")
 
 # Parse parameters
 options, arguments = parser.parse_args()
@@ -54,18 +47,6 @@ if options.exp_mode is not None:
     mode = "exp"
 else:
     exp_mode = None
-
-if options.words_count is not None:
-    if options.words_count == "False":
-        words_count = False
-    else:
-        words_count = True
-
-if options.stemming is not None:
-    if options.stemming == "False":
-        stemming = False
-    else:
-        stemming = True
 
 if options.validation_mode is not None:
     validation_mode = options.validation_mode
@@ -89,14 +70,12 @@ input_files = {'train': 'WikiQA_data/WikiQASent-train.txt',
                'validate': 'WikiQA_data/WikiQASent-dev.txt',
                'all': 'WikiQA_data/WikiQA.tsv'}
 
-#from stop_words import get_stop_words
-#stop_words = set(get_stop_words('en'))
-
+# Load stopwords
 stop_words = set()
 for l in open('short-stopwords.txt').readlines():
     stop_words.add(l.strip())
 
-print("Stopwords: %s" % stop_words)
+#print("Stopwords: %s" % stop_words)
 
 from string import punctuation
 p_marks = set(punctuation)
@@ -106,8 +85,6 @@ def get_config():
     config = {"mode": mode,
               "dimension": dimension,
               "s_size": s_size,
-              "words_count": words_count,
-              "stemming": stemming,
               "pooling_mode": pooling_mode,
               "learning_margin": learning_margin,
               "validation_mode": validation_mode}
@@ -125,8 +102,4 @@ def get_printy_dict(config_dict, ordering_list):
 config_dict = get_config()
 print("Main settings in globals:")
 p_order = ['mode', 'dimension', 's_size', 'pooling_mode', 'learning_margin', 'validation_mode']
-print(get_printy_dict(config_dict, p_order))
-
-print("Sentence tools settings:")
-p_order = ['words_count', 'stemming']
 print(get_printy_dict(config_dict, p_order))
