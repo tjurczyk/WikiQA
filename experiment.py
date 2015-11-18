@@ -185,32 +185,34 @@ def test_lr_on_data(X_train, y_train, X_validate, y_validate, X_test, y_test):
     lr = LogisticRegression(solver='lbfgs')#, class_weight={1: 0.9})#)#solver='lbfgs', class_weight={1: 0.5})
     lr.fit(X_train, y_train_flatten)
 
-    ######################################################
-    # This is only for DEBUG purposes
-    # Try to see if finding threshold on Test will improve
-    predictions_test = lr.predict_proba(X_test)
-    predictions_test = array([i[-1] for i in predictions_test])
-    #confidence_test = lr.decision_function(X_test)
-    best_threshold_test = new_find_threshold(y_test, predictions_test, predictions_test)
-    precision_test, recall_test, f1_test = evaluate_with_threshold(y_test, predictions_test, predictions_test, best_threshold_test)
-    globals.logger.info("DEBUG Found threshold: %f. Precision/recall/f1 on found threshold "
-                        "over test set: %f/%f/%f" % (best_threshold_test, precision_test, recall_test, f1_test))
-    ######################################################
-
-    # This is actual part: find threshold on validate and test on test
     predictions_val = lr.predict_proba(X_validate)
     predictions_val = array([i[-1] for i in predictions_val])
-    #confidence_val = lr.decision_function(X_validate)
-    best_threshold = new_find_threshold(y_validate, predictions_val, predictions_val)
-
-    precision, recall, f1 = evaluate_with_threshold(y_validate, predictions_val, predictions_val, best_threshold)
-    globals.logger.info("Precision/recall/f1 over validation set: %f/%f/%f" % (precision, recall, f1))
+    best_threshold_validate = new_find_threshold(y_validate, predictions_val, predictions_val)
+    precision_val, recall_val, f1_val = evaluate_with_threshold(y_validate, predictions_val, predictions_val,
+                                                                best_threshold_validate)
+    globals.logger.info("Found threshold: %f. Precision/recall/f1 over validation set: %f/%f/%f" %
+                        (best_threshold_validate, precision_val, recall_val, f1_val))
 
     predictions_test = lr.predict_proba(X_test)
     predictions_test = array([i[-1] for i in predictions_test])
+    best_threshold_test = new_find_threshold(y_test, predictions_test, predictions_test, verbose=True)
+    precision, recall, f1 = evaluate_with_threshold(y_test, predictions_test, predictions_test, best_threshold_test)
+    globals.logger.info("Found threshold: %f. Precision/recall/f1 over test set: %f/%f/%f" % (best_threshold_test, precision, recall, f1))
+
+    # This is actual part: find threshold on validate and test on test
+    #predictions_val = lr.predict_proba(X_validate)
+    #predictions_val = array([i[-1] for i in predictions_val])
+    #confidence_val = lr.decision_function(X_validate)
+    #best_threshold = new_find_threshold(y_validate, predictions_val, predictions_val)
+
+    #precision, recall, f1 = evaluate_with_threshold(y_validate, predictions_val, predictions_val, best_threshold)
+    #globals.logger.info("Precision/recall/f1 over validation set: %f/%f/%f" % (precision, recall, f1))
+
+    #predictions_test = lr.predict_proba(X_test)
+    #predictions_test = array([i[-1] for i in predictions_test])
     #confidence_test = lr.decision_function(X_test)
     #print_logistic_predictions(predictions_test, y_test[:30])
-    precision, recall, f1 = evaluate_with_threshold(y_test, predictions_test, predictions_test, best_threshold)
+    #precision, recall, f1 = evaluate_with_threshold(y_test, predictions_test, predictions_test, best_threshold)
 
     return precision, recall, f1
 
@@ -309,29 +311,29 @@ def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
             progress_bar.add(batch_size, values=[("train loss", train_loss),("train accuracy:", train_accuracy)])
 
         # Check the score on the validation data
-        results_val = test_model(model, X_validate, y_validate)
-        best_threshold = find_threshold(y_validate, results_val["y_predicted_scores"], results_val["y_predicted_scores"])
-        precision_val, recall_val, f1_val = evaluate_with_threshold(y_validate, results_val["y_predicted_scores"],
-                                                                    results_val["y_predicted_scores"],
-                                                                    best_threshold)
+        #results_val = test_model(model, X_validate, y_validate)
+        #best_threshold = find_threshold(y_validate, results_val["y_predicted_scores"], results_val["y_predicted_scores"])
+        #precision_val, recall_val, f1_val = evaluate_with_threshold(y_validate, results_val["y_predicted_scores"],
+        #                                                            results_val["y_predicted_scores"],
+        #                                                            best_threshold)
 
         # Check the score on the test data
-        results_test = test_model(model, X_test, y_test)
-        precision_test, recall_test, f1_test = evaluate_with_threshold(y_test, results_test["y_predicted_scores"],
-                                                                       results_test["y_predicted_scores"],
-                                                                       best_threshold)
+        #results_test = test_model(model, X_test, y_test)
+        #precision_test, recall_test, f1_test = evaluate_with_threshold(y_test, results_test["y_predicted_scores"],
+        #                                                               results_test["y_predicted_scores"],
+        #                                                               best_threshold)
 
-        nn_string = "NN tests:\n" + "Threshold".ljust(40, ".") + " %.4f" + "\nOver validation set\n" \
-                    + "validation loss, validation acc".ljust(40, ".") + " %.4f %.4f\n" \
-                    + "precision, recall, f1".ljust(40, ".") + " %.4f %.4f %.4f\n" \
-                    + "Over test set\n" \
-                    + "test loss, test acc".ljust(40, ".") + " %.4f %.4f\n" \
-                    + "precision, recall, f1".ljust(40, ".") + " %.4f %.4f %.4f\n" \
+        #nn_string = "NN tests:\n" + "Threshold".ljust(40, ".") + " %.4f" + "\nOver validation set\n" \
+        #            + "validation loss, validation acc".ljust(40, ".") + " %.4f %.4f\n" \
+        #            + "precision, recall, f1".ljust(40, ".") + " %.4f %.4f %.4f\n" \
+        #            + "Over test set\n" \
+        #            + "test loss, test acc".ljust(40, ".") + " %.4f %.4f\n" \
+        #            + "precision, recall, f1".ljust(40, ".") + " %.4f %.4f %.4f\n" \
 
-        globals.logger.info(nn_string % (best_threshold, results_val['test_loss'], results_val['test_accuracy'],
-                                         precision_val, recall_val, f1_val,
-                                         results_test['test_loss'], results_test['test_accuracy'],
-                                         precision_test, recall_test, f1_test))
+        #globals.logger.info(nn_string % (best_threshold, results_val['test_loss'], results_val['test_accuracy'],
+        #                                 precision_val, recall_val, f1_val,
+        #                                 results_test['test_loss'], results_test['test_accuracy'],
+        #                                 precision_test, recall_test, f1_test))
 
         # Now try with logistic regression
         predictions_train = model.predict(X_train)
@@ -410,9 +412,13 @@ def get_regular_model():
 
     model.add(extras.AveragePooling2D(poolsize=(globals.s_size, 1)))
 
-    model.add(Flatten())
+    #model.add(extras.CustomFlatten())
 
+    model.add(Flatten())
     model.add(Dense(2*globals.nb_filters, 1))
+
+    #model.add(extras.CustomFlatten3())
+    #model.add(Dense(globals.nb_filters, 1))
 
     model.add(Activation('sigmoid'))
 
@@ -468,9 +474,6 @@ def get_ngram_model():
     model.add(Merge(conv_filters, mode='concat'))
 
     model.add(Dense(len(ngram_filters), 1))
-
-
-
     # model = Sequential()
     # model.add(Convolution2D(globals.dimension, 1, 4, globals.dimension))
     # model.add(Activation('tanh'))
@@ -481,10 +484,6 @@ def get_ngram_model():
     #model.add(Flatten())
 
     #model.add(Dense(2*globals.dimension, 1))
-
-
-
-
     model.add(Activation('sigmoid'))
 
     globals.logger.info("Compiling model...")
@@ -577,13 +576,15 @@ def train(X_train, y_train, X_validate, y_validate, validation_mode):
     return model
 
 
-def new_find_threshold(questions_gold_sets, predictions, confidence):
+def new_find_threshold(questions_gold_sets, predictions, confidence, verbose=False):
 
-    thr = 0.02
+    thr = 0.05
     best_f1 = -1
     best_f1_thr = -1
-    while thr < 0.40:
+    while thr < 0.16:
         precision, recall, f1 = evaluate_with_threshold(questions_gold_sets, predictions, confidence, thr)
+        if verbose is True:
+            print("For thre: %f, prec/rec/f1: %f/%f/%f" % (thr, precision, recall, f1))
         if f1 > best_f1:
             best_f1 = f1
             best_f1_thr = thr
@@ -685,9 +686,9 @@ def find_threshold(questions_gold_sets, predictions, confidence):
 
 def evaluate_with_threshold(questions_gold_sets, predictions, confidence, threshold):
     index_begin = 0
-    all_questions_with_answers = 0
-    predicted_questions = 0
-    correctly_predicted_questions = 0
+    all_questions_with_answers = 0.0
+    predicted_questions = 0.0
+    correctly_predicted_questions = 0.0
 
     for question_set in questions_gold_sets:
         # Get the slice from predictions and confidence for this question_set
@@ -697,8 +698,8 @@ def evaluate_with_threshold(questions_gold_sets, predictions, confidence, thresh
 
         # Find the maximum value prediction
         max_val_index = numpy.argmax(predictions_slice)
-        if len(numpy.argwhere(predictions_slice == predictions_slice[max_val_index])) > 1:
-            raise ValueError("More than one max values in slice!")
+        #if len(numpy.argwhere(predictions_slice == predictions_slice[max_val_index])) > 1:
+        #    raise ValueError("More than one max values in slice!\nslice: %s" % predictions_slice)
 
         if confidence_slice[max_val_index] > threshold:
             predicted_answer = max_val_index
@@ -707,22 +708,29 @@ def evaluate_with_threshold(questions_gold_sets, predictions, confidence, thresh
 
         # Check if this question has an answer.
         # -1 if not, index in its question_set if yes
-        if 1 in question_set:
-            gold_answer_id = question_set.index(1)
-        else:
-            gold_answer_id = -1
+        gold_answer_ids = [x for x, y in enumerate(question_set) if y == 1]
+        nb_gold_correct_answers = len(gold_answer_ids)
+
+        #print("Q:\nmax_val_index: %d, question_set: %s\ngold_answers: %s\nslice: %s" % (max_val_index, question_set, gold_answer_ids, predictions_slice))
+
 
         # If there is an answer, increment number of all questions
-        if gold_answer_id > -1:
+        if nb_gold_correct_answers > 0:# and nb_gold_correct_answers != len(question_set):
             all_questions_with_answers += 1
 
         # If the question predicted with the answer, increment predicted_questions
         if predicted_answer > -1:
             predicted_questions += 1
+            # if nb_gold_correct_answers == 0:
+            #     predicted_questions += 1
+            # else:
+            #     predicted_questions += float(1)/float(nb_gold_correct_answers)
 
         # If the question predicted correctly, increment correctly_predicted_questions
-        if predicted_answer > -1 and predicted_answer == gold_answer_id:
+        #if nb_gold_correct_answers != len(question_set) and predicted_answer > -1 and predicted_answer in gold_answer_ids:
+        if predicted_answer > -1 and predicted_answer in gold_answer_ids:
             correctly_predicted_questions += 1
+            #correctly_predicted_questions += float(1)/float(nb_gold_correct_answers)
 
         index_begin = index_end
 

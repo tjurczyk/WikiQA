@@ -55,3 +55,39 @@ class AveragePooling2DVariable(MaxPooling2D):
             counts = T.neq(images2neibs(X, neib_shape=self.poolsize), 0).sum(axis=-1)
             average = (sums/counts).reshape((X.shape[0], X.shape[1], 2, 1))
         return average
+
+
+class CustomFlatten(Layer):
+    def __init__(self):
+        super(CustomFlatten, self).__init__()
+
+    def get_output(self, train=False):
+        X = self.get_input(train)
+        size = X.shape[0]
+        return X.reshape((size, globals.nb_filters, 2)).transpose(0, 2, 1)
+
+
+class CustomFlatten2(Layer):
+    def __init__(self):
+        super(CustomFlatten2, self).__init__()
+    def get_output(self, train=False):
+        X = self.get_input(train)
+        size = X.shape[0]
+        new_X = X.reshape((size, globals.nb_filters, 2)).transpose(0, 2, 1).reshape((2*size, globals.nb_filters))
+        left = new_X[::2]
+        right = new_X[1::2]
+        new_X = T.sum(left*right, axis=1)
+        return new_X.reshape((size, 1))
+
+
+class CustomFlatten3(Layer):
+    def __init__(self):
+        super(CustomFlatten3, self).__init__()
+    def get_output(self, train=False):
+        X = self.get_input(train)
+        size = X.shape[0]
+        new_X = X.reshape((size, globals.nb_filters, 2)).transpose(0, 2, 1).reshape((2*size, globals.nb_filters))
+        left = new_X[::2]
+        right = new_X[1::2]
+        new_X = left*right
+        return new_X#.reshape((size, 1))

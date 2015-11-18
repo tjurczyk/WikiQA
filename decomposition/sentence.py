@@ -56,7 +56,7 @@ def decompose_question(question_entity):
         wo_idf = get_occurrence_items_idf(question_words, answer_words)
         idf_sum += wo_idf
 
-        sample = [wo, wo_idf, q_length,] #wo_answers]
+        sample = [wo, wo_idf]#, q_length,] #wo_answers]
         samples.append(sample)
 
     idf_average = float(idf_sum)/len(question_entity.answers)

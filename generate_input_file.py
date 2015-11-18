@@ -51,7 +51,7 @@ def experiment():
             for idx, a in enumerate(q.answers):
                 a_sampled = get_sentence_vector_list(a, word2vec)
 
-                labels_q.append(int(idx == q.correct_answer))
+                labels_q.append(int(idx in q.correct_answer))
                 #print("\nAdding sample\n")
                 samples.append(generate_sample(q_sampled, a_sampled))
 

@@ -8,10 +8,13 @@ class Question:
     def __init__(self, question, answer, correct_answer=None):
         self.question = question
         self.answers = [answer,]
-        self.correct_answer = correct_answer
+        if correct_answer is None:
+            self.correct_answer = []
+        else:
+            self.correct_answer = [correct_answer, ]
 
     def add_correct_answer(self, correct_answer):
-        self.correct_answer = correct_answer
+        self.correct_answer.append(correct_answer)
 
     def add_answer(self, answer):
         self.answers.append(answer)
