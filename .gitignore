@@ -61,3 +61,6 @@ target/
 # Added extra for WikiQA
 data/
 model/
+*.npz
+.venv
+.DS_STORE
