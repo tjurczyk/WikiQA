@@ -2,6 +2,8 @@ from base import Triggering
 from base import GaussianDropoutLayer
 import lasagne
 
+#Epoch 7 T-L: 0.00120304134245 D-L: 0.000816085631565 D-P 0.434027777778 D-R 0.992063492063 D-F1 0.6038647343 Bias 0.2 Best Loss 0.000816085631565
+#Test-L: 0.000360034028941 Test-P 0.390522875817 Test-R 0.98353909465 Test-F1 0.559064327485 Bias 0.2
 
 class AveragePool(Triggering):
 	def __init__(self,name,macro_batch_size,micro_batch_size,end_epoch):
