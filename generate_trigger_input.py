@@ -72,11 +72,9 @@ def experiment():
         logger.info("Input generated for %s" % question_set)
         contexts = np.asarray(contexts,dtype=np.float32)
         questions = np.asarray(questions,dtype=np.float32)
-        labels = np.asarray(labels,dtype=np.int32)
-        q_masks = np.asarray(q_masks,dtype=np.int32)
-        c_masks = np.asarray(c_masks,dtype=np.int32)
-        print(c_masks[0])
-        print(q_masks[0])
+        labels = np.asarray(labels,dtype=np.float32)
+        q_masks = np.asarray(q_masks,dtype=np.float32)
+        c_masks = np.asarray(c_masks,dtype=np.float32)
         with open('./triggering/' +question_set+ '.npz','w') as f:
             np.savez(f, questions=questions, contexts=contexts, labels=labels, c_masks=c_masks, q_masks=q_masks)
 def load_questions_from_file(mode, q_limit, vocabulary=None):
