@@ -8,14 +8,17 @@ import cPickle as pickle
 from pprint import pprint
 from keras.utils import generic_utils
 from generate_input_file import load_questions_from_file
-from decomposition.sentence import decompose_questions, build_idf
 from sklearn.linear_model import LogisticRegression
 from random import randint
 from random import shuffle
+import sys
 
 import globals
 import extras
 from models import cnn
+from decomposition.sentence import SentenceExtractor
+
+results = []
 
 if globals.options.nb_epoch is not None:
     nb_epoch = int(globals.options.nb_epoch)
@@ -55,7 +58,7 @@ def dump_data(path, data, feature_file, label_file):
 
 def validate_on_lr(samples_train, samples_validate, samples_test,
                    predictions_train, predictions_validate, predictions_test,
-                   y_train, y_validate, y_test):
+                   y_train, y_validate, y_test, epoch):
     """
     Validate output of NN using Logistic Regression.
     :return: f1 of the score trained on the output from NN (train), tested on validation set.
@@ -86,11 +89,11 @@ def validate_on_lr(samples_train, samples_validate, samples_test,
         X_test.append(test_sample)
 
     globals.logger.info("Training and testing Logistic Regression to validate...")
-    precision, recall, f1 = test_lr_on_data(X_train, y_train, X_validate, y_validate, X_test, y_test)
+    precision, recall, f1 = test_lr_on_data(X_train, y_train, X_validate, y_validate, X_test, y_test, epoch)
     return precision, recall, f1
 
 
-def test_lr_on_data(X_train, y_train, X_validate, y_validate, X_test, y_test):
+def test_lr_on_data(X_train, y_train, X_validate, y_validate, X_test, y_test, epoch):
     y_train_flatten = list(itertools.chain(*y_train))
 
     # Train LR Model
@@ -100,21 +103,39 @@ def test_lr_on_data(X_train, y_train, X_validate, y_validate, X_test, y_test):
     # Test model on validation set
     predictions_val = lr.predict_proba(X_validate)
     predictions_val = array([i[-1] for i in predictions_val])
-    best_threshold_validate = find_threshold_logistic(y_validate, predictions_val, predictions_val)
-    precision_val, recall_val, f1_val = evaluate_with_threshold(y_validate, predictions_val, predictions_val,
-                                                                best_threshold_validate)
-    globals.logger.info("Found threshold: %f. Precision/recall/f1 over validation set: %f/%f/%f" %
-                        (best_threshold_validate, precision_val, recall_val, f1_val))
 
-    # Test model on test set
     predictions_test = lr.predict_proba(X_test)
     predictions_test = array([i[-1] for i in predictions_test])
-    best_threshold_test = find_threshold_logistic(y_test, predictions_test, predictions_test, verbose=True)
-    precision, recall, f1 = evaluate_with_threshold(y_test, predictions_test, predictions_test, best_threshold_test)
-    globals.logger.info("Found threshold: %f. Precision/recall/f1 over test set: %f/%f/%f" %
-                        (best_threshold_test, precision, recall, f1))
 
-    return precision, recall, f1
+    for thr in range(5, 15):
+        thr /= 100.0
+        precision_val, recall_val, f1_val = evaluate_with_threshold(
+            y_validate, predictions_val, predictions_val, thr)
+        precision_test, recall_test, f1_test = evaluate_with_threshold(
+            y_test, predictions_test, predictions_test, thr)
+        res = ("epoch: %d, thre=%.2f" %(epoch, thr), precision_val, recall_val, f1_val,
+               precision_test, recall_test, f1_test)
+        results.append(res)
+
+
+    # best_threshold_validate = find_threshold_logistic(y_validate, predictions_val, predictions_val)
+    # precision_val, recall_val, f1_val = evaluate_with_threshold(y_validate, predictions_val, predictions_val,
+    #                                                             best_threshold_validate)
+    # globals.logger.info("Found threshold: %f. Precision/recall/f1 over validation set: %f/%f/%f" %
+    #                     (best_threshold_validate, precision_val, recall_val, f1_val))
+    #
+    # # Test model on test set
+    # predictions_test = lr.predict_proba(X_test)
+    # predictions_test = array([i[-1] for i in predictions_test])
+    # #best_threshold_test = find_threshold_logistic(y_test, predictions_test, predictions_test, verbose=True)
+    # precision, recall, f1 = evaluate_with_threshold(y_test, predictions_test, predictions_test, best_threshold_validate)
+    # #globals.logger.info("Found threshold: %f. Precision/recall/f1 over test set: %f/%f/%f" %
+    # #                    (best_threshold_test, precision, recall, f1))
+    # globals.logger.info("On threshold from validate. Precision/recall/f1 over test set: %f/%f/%f" %
+    #                     (precision, recall, f1))
+
+    #return precision, recall, f1
+    return 0,0,0
 
 
 def test_model(model, X_test, y_test):
@@ -144,12 +165,13 @@ def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
     questions_validate, v, idf = load_questions_from_file("validate", q_limit['validate'])
     questions_test, v, idf = load_questions_from_file("test", q_limit['test'])
 
-    build_idf([questions_train, questions_validate, questions_test])
+    se = SentenceExtractor(globals.lr_features)
+    se.build_idf([questions_train, questions_validate, questions_test])
 
     # Create samples for loaded questions
-    samples_train = decompose_questions(questions_train)
-    samples_validate = decompose_questions(questions_validate)
-    samples_test = decompose_questions(questions_test)
+    samples_train = se.decompose_questions(questions_train)
+    samples_validate = se.decompose_questions(questions_validate)
+    samples_test = se.decompose_questions(questions_test)
 
     print("len of X_train: %d and samples_train: %d" % (len(X_train), len(samples_train)))
 
@@ -201,19 +223,25 @@ def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
         # Evaluate on logistic regression
         precision, recall, f1 = validate_on_lr(samples_train, samples_validate, samples_test,
                                                predictions_train, predictions_validate, predictions_test,
-                                               y_train, y_validate, y_test)
+                                               y_train, y_validate, y_test, e)
 
-        lr_string = "LR tests:\n" + "Over test set\n" \
-                    + "precision, recall, f1".ljust(40, ".") + " %.4f %.4f %.4f\n"
+        # lr_string = "LR tests:\n" + "Over test set\n" \
+        #             + "precision, recall, f1".ljust(40, ".") + " %.4f %.4f %.4f\n"
 
-        globals.logger.info(lr_string % (precision, recall, f1))
+        # globals.logger.info(lr_string % (precision, recall, f1))
 
         if f1 >= best_f1:
             best_f1 = f1
             best_f1_index = e
 
-    globals.logger.info("Training done, best f1 on logistic regression is: %.4f for epoch nr: %d" %
-                   (best_f1, best_f1_index))
+    #globals.logger.info("Training done, best f1 on logistic regression is: %.4f for epoch nr: %d" %
+    #               (best_f1, best_f1_index))
+
+    sorted_trigger_results = sorted(results, key=lambda res: res[3], reverse=True) # according to dev F1
+    for r in sorted_trigger_results[:5]:
+        print "LR -> %s\t" \
+              "val precision: %.4f, val recall: %.4f, val F1: %.4f, " \
+              "test precision: %.4f, test recall: %.4f, test F1: %.4f" % r
 
 
 def shuffle_set(X, y):
@@ -418,7 +446,8 @@ def get_config():
               "exp_mode": globals.exp_mode,
               "nb_epoch": nb_epoch,
               "nb_filters": globals.nb_filters,
-              "batch_size": batch_size}
+              "batch_size": batch_size,
+              "lr_features": globals.lr_features}
     return config
 
 
@@ -449,7 +478,7 @@ if __name__ == "__main__":
         else "all"
 
     print("Experiment mode options:")
-    p_order = ['exp_mode', 'nb_epoch', 'nb_filters', 'batch_size', 'train_data', 'validation_data', 'test_data']
+    p_order = ['exp_mode', 'lr_features', 'nb_epoch', 'nb_filters', 'batch_size', 'train_data', 'validation_data', 'test_data']
     print(globals.get_printy_dict(get_config(), p_order))
 
     if globals.exp_mode == "test_nn_logistic":

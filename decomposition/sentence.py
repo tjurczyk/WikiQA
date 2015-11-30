@@ -1,91 +1,70 @@
 from pprint import pprint
 import re
-from math import log10
-from collections import defaultdict
 import globals
 import numpy as np
 import sys
+from collections import defaultdict
 
-idf = defaultdict(float)
-
-
-def decompose_questions(questions):
-    """
-    Decompose set of questions.
-    :param questions: Set of questions
-    :type questions list
-    :return: List of samples (one sample if question-sentence pair) of all questions
-    :rtype: list
-    """
-
-    samples = []
-
-    for question in questions:
-        samples.extend(decompose_question(question))
-        #samples.append(decompose_question(question))
-
-    return samples
+import lexical
+import syntactic
+import utils
 
 
-def decompose_question(question_entity):
-    """
-    Decompose a single question into set of samples.
-    :param question_entity: Entity of a question
-    :type question_entity: Question
-    :return: List of samples (one sample is question-sentence pair)
-    :rtype: list
-    """
+class SentenceExtractor():
+    def __init__(self, features):
+        self.idf = None
+        self.features = features
 
-    samples = []
+    def decompose_questions(self, questions):
+        if "wo_idf" in self.features and self.idf is None:
+            raise RuntimeError("idf feature is in the list, but no idf_dictionary has been initialized. "
+                               "Call 'build_idf()' method before")
 
-    question = question_entity.question
-    question_words = get_sentence_words(question)
+        samples = []
 
-    idf_sum = 0.0
-    q_length = len(question_words)
+        for question in questions:
+            samples.extend(self.decompose_question(question))
 
-    wo_answers = float(get_occurrence_items_answers(question, question_entity.answers))#/q_length
-    #print("wo_answers = %s" % wo_answers)
-    #raw_input()
+        return samples
 
-    for idy, a in enumerate(question_entity.answers):
-        answer = a
-        answer_words = get_sentence_words(answer)
+    def decompose_question(self, question_entity):
+        samples = []
 
-        wo = get_occurrence_items(question_words, answer_words)
-        wo_idf = get_occurrence_items_idf(question_words, answer_words)
-        idf_sum += wo_idf
+        for idy, a in enumerate(question_entity.answers):
+            sample = []
+            for f in self.features:
+                if f == "wo":
+                    sample.append(lexical.word_co_occurrence(question_entity.question, a))
+                elif f == "wo_idf":
+                    sample.append(lexical.word_co_occurrence_idf(question_entity.question, a, self.idf))
+                elif f == "q_len":
+                    sample.append(lexical.question_length(question_entity.question))
+                elif f == "dep":
+                    pass
 
-        sample = [wo, wo_idf, q_length,] #wo_answers]
-        samples.append(sample)
+            samples.append(sample)
 
-    idf_average = float(idf_sum)/len(question_entity.answers)
+        return samples
 
-    #for sample in samples:
-    #    sample.extend([idf_average, sample[1]/idf_average if sample[1] != 0.0 else 0])
+    def build_idf(self, l_of_data_sets):
+        self.idf = defaultdict(float)
 
-    #print("samples:")
-    #pprint(samples)
-    return samples
+        number_of_documents = 0.0
 
+        for question_set in l_of_data_sets:
+            for question in question_set:
+                q_words = set(utils.get_sentence_words(question.question))
+                n_of_answers = len(question.answers)
 
-def get_occurrence_items_answers(q, answers):
-    question_words = get_sentence_words(q)
-    words = set()
+                for word in q_words:
+                    if word in globals.stop_words:
+                        continue
+                    self.idf[word] += n_of_answers
 
-    for a in answers:
-        a_words = set(get_sentence_words(a))
-        words.update(a_words.intersection(question_words))
+                number_of_documents += n_of_answers
 
-    return len(words)
-
-
-def get_sentence_words(sentence):
-    string = re.sub(r"[^A-Za-z0-9(),!?\'\`]", " ", sentence)
-    string = re.sub(r"\s{2,}", " ", string)
-    string = string.strip().lower()
-
-    return string.split()
+        for (k, v) in self.idf.items():
+            self.idf[k] = np.log(float(number_of_documents)/v)
 
 
 def get_normalized_numbers(l_words):
@@ -102,74 +81,3 @@ _digits = re.compile('\d')
 
 def contains_digits(d):
     return bool(_digits.search(d))
-
-
-def get_occurrence_items(s1, s2):
-    """
-    Returns an array of co-occurring words in sentence1 and sentence2.
-    """
-
-    q_set, a_set = set(s1), set(s2)
-    count = 0.0
-
-    for word in q_set:
-        if word in a_set and word not in globals.stop_words:
-            count += 1.0
-
-    return count
-
-
-def get_occurrence_items_idf(s1, s2):
-    """
-    Returns a normalized score of overlapping
-    """
-
-    q_set, a_set = set(s1), set(s2)
-    score = 0.0
-
-    for word in q_set:
-        if word in a_set and word not in globals.stop_words:
-            score += idf[word]
-
-    return score
-
-
-def build_idf(l_of_questions):
-    """
-    Build an idf dictionary for question set
-    :param questions: Question set
-    :type questions: list
-    :return: idf dictionary
-    :rtype: dict
-    """
-
-    #idf = defaultdict(float)
-
-    number_of_documents = 0.0
-
-    #pprint(questions)
-
-    for question_set in l_of_questions:
-        for question in question_set:
-            q_words = set(get_sentence_words(question.question))
-            n_of_answers = len(question.answers)
-
-            for word in q_words:
-                if word in globals.stop_words:
-                    continue
-                idf[word] += n_of_answers
-
-            number_of_documents += n_of_answers
-
-    # print("before dict: ")
-    # pprint(idf)
-    # print("n of documents: %d" % number_of_documents)
-
-    for (k, v) in idf.items():
-        idf[k] = np.log(float(number_of_documents)/v)
-
-    # print("after dict: ")
-    # pprint(idf)
-    # print("n of documents: %d" % number_of_documents)
-
-    #return idf

@@ -6,13 +6,14 @@ from os import makedirs
 from pprint import pprint
 from representation.wordrepresentation import Word2VecModel as w2vec
 from representation.question import Question
-from decomposition.sentence import get_sentence_words, get_normalized_numbers
+from decomposition.utils import get_sentence_words
 from collections import defaultdict
 import numpy as np
 import logging
 import re
 
 import globals
+from nlp_utils.dependency_structure import Dependency_Structure
 
 logger = logging.getLogger("wikiqa.generation")
 
@@ -25,7 +26,6 @@ q_limit = None
 def experiment():
 
     # List for samples (one sample is ibe
-
     vocabulary = defaultdict(float)
     questions = {}
 
@@ -97,6 +97,11 @@ def load_questions_from_file(mode, q_limit, vocabulary=None):
     else:
         print("Vocabulary passed")
 
+    # Load dependency trees
+    ds = Dependency_Structure(globals.dep_input_files[mode])
+    dep_iterator = 0
+    print("len of ds: %d" % len(ds.sentences))
+
     with open(globals.input_files.get(mode)) as f:
         question_text = None
         question = None
@@ -131,16 +136,18 @@ def load_questions_from_file(mode, q_limit, vocabulary=None):
 
             # If Word2Vec will use normalized numbers (0000),
             # update vocabulary with them
-            if globals.normalize_numbers is True:
-                    for i in get_normalized_numbers(words_set):
-                        vocabulary[i] += 1
+            # if globals.normalize_numbers is True:
+            #         for i in get_normalized_numbers(words_set):
+            #             vocabulary[i] += 1
 
             # If new question entity
             if is_new_question or question is None:
                 answers_count = 0
-                question = Question(split_line[0], split_line[1])
+                question = Question(split_line[0], ds.sentences[dep_iterator], split_line[1], ds.sentences[dep_iterator+1])
+                dep_iterator += 2
             else:
-                question.add_answer(split_line[1])
+                question.add_answer(split_line[1], ds.sentences[dep_iterator])
+                dep_iterator += 1
 
             # Add answer if found
             if split_line[2] == "1":
