@@ -1,0 +1,110 @@
+{
+    "language"        : "PYTHON",
+    "main-file"       : "init.py",
+    "experiment-name" : "Attention",
+    "likelihood"      : "NOISELESS",
+    "resources" : {
+        "home" : {
+            "scheduler"         : "local",
+            "max-concurrent"    : 2,
+            "max-finished-jobs" : 1000
+        }
+    },
+    "variables": {
+        "lr" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : 1e-7,
+            "max"  : 1e-3
+        },
+        "attention_units" : {
+            "type" : "INT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 500
+        },
+        "attention_dropout" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 0.6
+        },
+        "recurrent_units" : {
+            "type" : "INT",
+            "size" : 1,
+            "min"  : 15,
+            "max"  : 200
+        },
+        "q_recurrent_layers" : {
+            "type" : "INT",
+            "size" : 1,
+            "min"  : 2,
+            "max"  : 10
+        },
+        "c_recurrent_layers" : {
+            "type" : "INT",
+            "size" : 1,
+            "min"  : 2,
+            "max"  : 10
+        },
+        "dense_units" : {
+            "type" : "INT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 1500
+        },
+        "dense_dropout" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 0.6
+        },
+        "out_recurrent_units" : {
+            "type" : "INT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 200
+        },
+        "out_recurrent_dropout" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 0.6
+        },
+        "candidate_dropout" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 0.6
+        },
+        "question_dropout" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 0.6
+        },
+        "c_embedding_dropout" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 0.6
+        },
+        "q_embedding_dropout" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 0.6
+        },
+        "cost_sensitive" : {
+            "type" : "INT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 100
+        },
+        "lstm" : {
+            "type" : "ENUM",
+            "size" : 1,
+            "options": ["lstm","gru"]
+        }
+    }
+}
