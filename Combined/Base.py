@@ -604,11 +604,6 @@ class Base(object):
         self.leakiness = args.leakiness
         self.checkpoint = args.checkpoint
         self.max_patience = args.patience
-        self.remove = args.remove
-        self.replace = args.replace
-        if self.replace:
-            assert self.replace == self.save, 'you must save to replace'
-        assert self.checkpoint == (self.max_patience > 0), 'patience must be greater than 0 if you checkpoint'
         self.bidirectional = args.bidirectional
         self.gn = args.gn
         self.lstm = args.lstm
@@ -620,8 +615,15 @@ class Base(object):
         self.dry = args.dry
         self.end_epoch = args.train
         self.eval = args.evaluate
+
         self.save = args.save
         self.load = args.load
+        self.remove = args.remove
+        self.replace = args.replace
+        if self.replace:
+            assert self.replace == self.save, 'you must save to replace'
+        assert self.checkpoint == (self.max_patience > 0), 'patience must be greater than 0 if you checkpoint'
+
         self.end_p_epoch = args.pretrain
         self.hinge = args.hinge
         self.check_input = args.check
@@ -667,7 +669,7 @@ class Base(object):
         self.load_data()
         self.build_model()
         
-        if self.replace:
+        if not self.replace:
             if self.load == 1:
                 self.start_p_epoch, self.best_lm_loss = read_lm_data(self.save, self.name, self.start_p_epoch, self.model)
             elif self.load == 2:
