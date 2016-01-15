@@ -542,7 +542,7 @@ class Base(object):
         parser.add_argument('--q_embedding_dropout',type=float,help='question embedding dropout',default=-1.)
         parser.add_argument('--cost_sensitive',type=float,help='weigh positive class by its proportion',default=-1.0)
         parser.add_argument('--g_noise',type=float,help='base variance of gradient noise ~[0.01,1]',default=-1.0)
-        parser.add_argument('--g_noise_decay',type=float,help='decay schedule of gradient noise',default=-1.0)
+        parser.add_argument('--g_noise_decay',type=float,help='decay schedule of gradient noise',default=.6)
         parser.add_argument('--trainable_embedding',action='store_true',help='sets trainable tag for embeddings')
         parser.add_argument('--embedding_attention',action='store_true',help='uses embedding instead of recurrent layers for attention')
         parser.add_argument('--slice_final',action='store_true',help='slice final recurrent layer (stacks)')
@@ -557,7 +557,7 @@ class Base(object):
         parser.add_argument('--lstm',action='store_true',help='use lstm instead of GRU')
         parser.add_argument('--patience',type=int,help='patience resets to this value after improvement',default=0)
         parser.add_argument('--checkpoint',action='store_true',help='loads best model whenever no improvement')
-        parser.add_argument('--tmp',action='store_true',help='remove the saved model after evaluation')
+        parser.add_argument('--replace',action='store_true',help='replace the previously saved model ')
         parser.add_argument('--hinge',action='store_true',help='use hinge loss instead of cross-entropy')
         parser.add_argument('--debug',action='store_true',help='sets debug')
         parser.add_argument('-d','--dry',action='store_true',help='trains and test on dev split to check for errors')
@@ -568,6 +568,7 @@ class Base(object):
         parser.add_argument('-p','--pretrain',type=int,help='final pretraining epoch',default=0)
         parser.add_argument('--pbar',action='store_true',help='use a progress bar, ugly file output')
         parser.add_argument('--rename',type=str,help='name modification')
+        parser.add_argument('--remove',type=str,help='remove the model on exit')
         parser.add_argument('--check',action='store_true',help='input sanity check')
 
         args = parser.parse_args()
@@ -603,9 +604,10 @@ class Base(object):
         self.leakiness = args.leakiness
         self.checkpoint = args.checkpoint
         self.max_patience = args.patience
-        self.tmp = args.tmp
-        if self.tmp:
-            assert self.tmp == args.save == args.evaluate, 'you must save and evaluate your model if you want a temporary model'
+        self.remove = args.remove
+        self.replace = args.replace
+        if self.replace:
+            assert self.replace == self.save, 'you must save to replace'
         assert self.checkpoint == (self.max_patience > 0), 'patience must be greater than 0 if you checkpoint'
         self.bidirectional = args.bidirectional
         self.gn = args.gn
@@ -665,11 +667,12 @@ class Base(object):
         self.load_data()
         self.build_model()
         
-        if self.load == 1:
-            self.start_p_epoch, self.best_lm_loss = read_lm_data(self.save, self.name, self.start_p_epoch, self.model)
-        elif self.load == 2:
-            self.start_epoch,self.best_candidate_loss,self.best_candidate_f1,\
-            self.best_question_f1,self.best_question_bias = read_model_data(self.load,self.name, self.model)
+        if self.replace:
+            if self.load == 1:
+                self.start_p_epoch, self.best_lm_loss = read_lm_data(self.save, self.name, self.start_p_epoch, self.model)
+            elif self.load == 2:
+                self.start_epoch,self.best_candidate_loss,self.best_candidate_f1,\
+                self.best_question_f1,self.best_question_bias = read_model_data(self.load,self.name, self.model)
         
         if self.end_epoch-self.start_epoch > 0 or self.end_p_epoch-self.start_p_epoch > 0:
             self.pretrain_train_model()
@@ -681,7 +684,7 @@ class Base(object):
         if self.eval:
             self.evaluate_model()
         
-        remove_model_data(self.tmp, self.name)
+        remove_model_data(self.remove, self.name)
         return self.best_candidate_loss
 
     def load_hyper(self, params):
