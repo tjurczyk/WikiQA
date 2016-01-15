@@ -27,6 +27,8 @@ import time
 from misc import default_word, default_vocab, get_pbar, save_plots, log, read_model_data, write_model_data, read_lm_data, write_lm_data, print_input, create_lm_target
 from Base import Base
 from losses import define_lm_losses, define_candidate_losses
+from Optimizers import gd_adam
+from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 
 class Base_Sep(Base):
     def __init__(self,name):
@@ -70,6 +72,8 @@ class Base_Sep(Base):
         c_masks_in = T.matrix('c_masks')
         labels_in = T.ivector('candidates_labels')
         i = T.iscalar()
+        e = T.fscalar()
+        rs = RandomStreams(seed=1)
 
         outputs = self.define_layers(questions_in,candidates_in,q_masks_in,c_masks_in)
         if self.debug:
@@ -83,20 +87,19 @@ class Base_Sep(Base):
         self.candidate_params = lasagne.layers.get_all_params(outputs[0], trainable=True)
 
         [train_candidate_pred, train_label, train_candidate_loss,
-        train_top_candidate, train_top_candidate_label, train_labels_any] = define_candidate_losses(train_candidate_pred, labels_in, outputs, self.hinge, self.cost_sensitive, self.ratio, self.l1, self.l2)
+        train_top_candidate, train_top_candidate_label, train_labels_any] = define_candidate_losses(train_candidate_pred, labels_in, outputs, self.hinge, self.cost_sensitive, self.l1, self.l2)
         [test_candidate_pred, test_label, test_candidate_loss,
-        test_top_candidate, test_top_candidate_label, test_labels_any] = define_candidate_losses(test_candidate_pred, labels_in, outputs, self.hinge, self.cost_sensitive, self.ratio, self.l1, self.l2)
-
+        test_top_candidate, test_top_candidate_label, test_labels_any] = define_candidate_losses(test_candidate_pred, labels_in, outputs, self.hinge, self.cost_sensitive, self.l1, self.l2)
         if self.debug:
             print('defined losses')
 
         print('learning rate {}'.format(self.learning_rate))
         print('{} parameters candidate'.format(lasagne.layers.count_params(outputs[0])))
-
         if self.debug:
             updates = OrderedDict()
         else:
-            updates = lasagne.updates.adam(train_candidate_loss, self.candidate_params, learning_rate=self.learning_rate)
+            # updates = lasagne.updates.adam(train_candidate_loss, self.candidate_params, learning_rate=self.learning_rate)
+            updates = gd_adam(train_candidate_loss, self.candidate_params, rs, e, self.noise_eta, self.noise_decay, learning_rate=self.learning_rate)
             
         qb = np.empty((self.macro_batch_size,1,self.Q_MAX_LENGTH), dtype='int32')
         cb = np.empty((self.macro_batch_size,self.MAX_N_CANDIDATES,self.C_MAX_LENGTH), dtype='int32')
@@ -113,7 +116,7 @@ class Base_Sep(Base):
         if self.debug:
             print('defined shared variables')
 
-        self.train_fn = theano.function([i],
+        self.train_fn = theano.function([i,e],
             [train_candidate_pred, train_label, train_candidate_loss,
             train_top_candidate, train_top_candidate_label, train_labels_any], updates=updates,
             givens={
@@ -154,7 +157,7 @@ class Base_Sep(Base):
             else:
                 lm_updates = lasagne.updates.adam(train_lm_loss, self.lm_params, learning_rate=self.learning_rate)
 
-            self.train_lm_fn = theano.function([i], train_lm_loss, updates=lm_updates,
+            self.train_lm_fn = theano.function([i,e], train_lm_loss, updates=lm_updates,
                 givens={
                 questions_in: self.questions_macro_batch[i],
                 candidates_in: self.candidates_macro_batch[i],
@@ -186,12 +189,12 @@ class Base_Sep(Base):
         prefix = ''
         if (self.gn is True):
             prefix = 'GN_'
-        with open('../../data/'+prefix+'embedding.pickle', 'rb') as f:
+        with open('load/'+prefix+'embedding.pickle', 'rb') as f:
             self.embedding,self.vocab_size = pickle.load(f)
             self.EMBEDDING_DIM = self.embedding.shape[-1]
             print('Vector Dim',self.EMBEDDING_DIM)
         for split in splits:
-            filepath = os.path.join('../../data/', '%s%s.%s' % (prefix,split, 'npz'))
+            filepath = os.path.join('load/', '%s%s.%s' % (prefix,split, 'npz'))
             print('loading ' + filepath)
             data = np.load(filepath)
             self.questions.append(data['questions'].astype('int32'))
@@ -202,17 +205,7 @@ class Base_Sep(Base):
             data.close()
         if self.check_input:
             self.print_input(vocab2word)
-        
-        ''' invalid when using padding
-        counts = np.bincount(self.labels[0].ravel())
-        self.ratio = float(counts[1])/counts[0]
-        print('bincounts for train labels', counts)
-        counts = np.bincount(self.labels[1].ravel())
-        print(self.labels[1])
-        print('bincounts for dev labels', counts)
-        print('proportion of positive samples in train {}'.format(self.ratio))
-        '''
-        self.ratio = .3
+
     def set_all(self, i, macro_batch_index, pretrain=False):
         q = self.questions[i][macro_batch_index * self.macro_batch_size: (macro_batch_index + 1) * self.macro_batch_size, :1, :self.Q_MAX_LENGTH]
         c = self.candidates[i][macro_batch_index * self.macro_batch_size: (macro_batch_index + 1) * self.macro_batch_size, :self.MAX_N_CANDIDATES, :self.C_MAX_LENGTH]

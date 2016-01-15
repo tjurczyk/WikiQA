@@ -1,7 +1,7 @@
 #CUDA_LAUNCH_BLOCKING=0 THEANO_FLAGS=on_unused_input='ignore',device=gpu1,profile=False python Simple_Sep_EOS.py  --pbar --pretrain 0 --train 10 --recurrent_layers 1 --candidate_dropout 0.2 --question_dropout 0.2 --lr 1e-3 --l1 1e-6 --recurrent_units 512 --dense_units 512 --trainable_embedding --slice_final
 from Base_Sep import Base_Sep
 import lasagne
-from Layer import RepeatLayer
+from Layer import RepeatLayer, WordDropoutLayer
 from misc import default_word, default_vocab, get_pbar, save_plots, log, read_model_data, write_model_data, read_lm_data, write_lm_data
 from losses import define_lm_losses, define_candidate_losses
 
@@ -18,12 +18,12 @@ class Simple_Sep_EOS(Base_Sep):
 
         question = lasagne.layers.InputLayer(shape=(1,self.Q_MAX_LENGTH), input_var=questions_in)
         if self.question_dropout > 0:
-            question = lasagne.layers.WordDropoutLayer(question, p=self.question_dropout)
+            question = WordDropoutLayer(question, p=self.question_dropout)
         question_EOS = lasagne.layers.PadLayer(question, width=[(0,0),(0,1)],val=1,batch_ndim=0,dtype='int32')
         repeated_question = RepeatLayer(question_EOS,self.MAX_N_CANDIDATES)
         candidates = lasagne.layers.InputLayer(shape=(self.MAX_N_CANDIDATES,self.C_MAX_LENGTH), input_var=candidates_in)
         if self.candidate_dropout > 0:
-            candidates = lasagne.layers.WordDropoutLayer(candidates, p=self.candidate_dropout)
+            candidates = WordDropoutLayer(candidates, p=self.candidate_dropout)
         question_mask = lasagne.layers.InputLayer(shape=(1,self.Q_MAX_LENGTH), input_var=q_masks_in)
         question_mask_EOS = lasagne.layers.PadLayer(question_mask, width=[(0,0),(0,1)],val=1,batch_ndim=0,dtype='float32')
         repeated_question_mask = RepeatLayer(question_mask_EOS,self.MAX_N_CANDIDATES)

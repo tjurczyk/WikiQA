@@ -1,6 +1,24 @@
 from lasagne.layers import Layer, MergeLayer
 import theano
 import theano.tensor as T
+from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
+
+class WordDropoutLayer(Layer):
+    def __init__(self, incoming, p=0.5, **kwargs):
+        super(WordDropoutLayer, self).__init__(incoming, **kwargs)
+        self._srng = RandomStreams(seed=1)
+        self.p = p
+
+    def get_output_for(self, input, deterministic=False, **kwargs):
+        if deterministic or self.p == 0:
+            return input
+        else:
+            retain_prob = 1 - self.p
+            # use nonsymbolic shape for dropout mask if possible
+            input_shape = self.input_shape
+            if any(s is None for s in input_shape):
+                input_shape = input.shape
+            return input * self._srng.binomial(input_shape,p=retain_prob,dtype='int32')
 
 class RepeatLayer(Layer):
     def __init__(self, incoming, repeats, axis=0, **kwargs):

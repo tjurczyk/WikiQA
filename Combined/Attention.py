@@ -1,10 +1,10 @@
 #CUDA_LAUNCH_BLOCKING=0 THEANO_FLAGS=on_unused_input='ignore',device=gpu1,profile=False python Attention.py  --pbar --pretrain 0 --train 10 --recurrent_layers 1 --candidate_dropout 0.2 --question_dropout 0.2 --lr 1e-3 --l1 1e-6 --recurrent_units 512 --dense_units 512 --trainable_embedding --slice_final
 from Base_Sep import Base_Sep
 import lasagne
-from Layer import RepeatLayer, MergeExpressionLayer
+from Layer import RepeatLayer, MergeExpressionLayer, WordDropoutLayer
 from lasagne.layers import reshape
 from misc import default_word, default_vocab, get_pbar, save_plots, log, read_model_data, write_model_data, read_lm_data, write_lm_data, slice_out
-from lasagne.layers import DenseLayer, InputLayer, WordDropoutLayer, DropoutLayer, EmbeddingLayer, SliceLayer, ElemwiseSumLayer, Pool1DLayer, ConcatLayer, ReshapeLayer, LSTMLayer, GRULayer, ElemwiseMergeLayer
+from lasagne.layers import DenseLayer, InputLayer, DropoutLayer, EmbeddingLayer, SliceLayer, ElemwiseSumLayer, Pool1DLayer, ConcatLayer, ReshapeLayer, LSTMLayer, GRULayer, ElemwiseMergeLayer, FeaturePoolLayer
 from lasagne.nonlinearities import LeakyRectify
 import theano.tensor as T
 class Attention(Base_Sep):
@@ -52,70 +52,81 @@ class Attention(Base_Sep):
         q_forward_slice = SliceLayer(q_rep_f, indices=-1, axis=1) #(1, recurrent_units)
         repeated_question = RepeatLayer(q_forward_slice, self.MAX_N_CANDIDATES)
         # ---------------------------------------------------- candidate RNN -------------------------------------------------------------
-        for _ in xrange(self.c_recurrent_layers):
-            c_rep_f = RecurrentLayer(c_embedding, self.recurrent_units, mask_input=candidate_mask, grad_clipping=GRAD_CLIP, only_return_final=False)
-        c_feature= c_rep_f # (30,40,c_recurrent Units)
+        c_rep_f = RecurrentLayer(c_embedding, self.recurrent_units, mask_input=candidate_mask, grad_clipping=GRAD_CLIP, only_return_final=False)
+        if self.bidirectional:
+            c_rep_b = RecurrentLayer(c_embedding, self.recurrent_units, mask_input=candidate_mask, grad_clipping=GRAD_CLIP, only_return_final=False, backwards=True)
 
-        # ----------------------------------------------- Attention candidate RNN -------------------------------------------------------------
-        # self.c_recurrent_units = 50
-        # for i in xrange(1,self.recurrent_layers+1):
-        #     c_rep_f = RecurrentLayer(c_embedding, self.c_recurrent_units, mask_input=candidate_mask, grad_clipping=GRAD_CLIP, only_return_final=False)
-        #     dot = MergeExpressionLayer([repeat_q_feature,c_rep_f], lambda X,Y: T.batched_tensordot(X,Y,axes=[2,2]), output_shape=(30,self.Q_MAX_LENGTH,self.C_MAX_LENGTH))
-        #     if self.attention_units > 0:
-        #         if self.attention_dropout > 0:
-        #             dot = DropoutLayer(DenseLayer(dot, num_units=self.attention_units, nonlinearity=lasagne.nonlinearities.tanh), p=self.attention_dropout)
-        #         else:
-        #             dot = DenseLayer(dot, num_units=self.attention_units, nonlinearity=lasagne.nonlinearities.tanh)
-        #     attention = DenseLayer(dot, num_units=self.C_MAX_LENGTH, nonlinearity=lasagne.nonlinearities.softmax)
-        #     attention = RepeatLayer(ReshapeLayer(attention, (-1, self.C_MAX_LENGTH, 1)),repeats=self.c_recurrent_units, axis=2)
-        #     c_rep_f = ElemwiseMergeLayer([attention, c_rep_f], T.mul)
-        # attended_c_feature = c_rep_f # (30,40,c_recurrent Units)
+            c_feature = ElemwiseSumLayer([c_rep_f,c_rep_b]) # (30,40,c_recurrent Units)
+            c_rep_f = c_feature
+            c_rep_b = c_feature
+        else: # in case we use only 1 layer
+            c_feature = c_rep_f # (30,40,c_recurrent Units)
+
+        if self.c_recurrent_layers > 1:
+            for _ in xrange(1,self.c_recurrent_layers):
+                c_rep_f = RecurrentLayer(c_rep_f, self.recurrent_units, mask_input=candidate_mask, grad_clipping=GRAD_CLIP, only_return_final=False)
+                if self.bidirectional:
+                    c_rep_b = RecurrentLayer(c_rep_b, self.recurrent_units, mask_input=candidate_mask, grad_clipping=GRAD_CLIP, only_return_final=False, backwards=True)
+
+                    c_feature = ElemwiseSumLayer([c_rep_f,c_rep_b]) # (30,40,c_recurrent Units)
+                    c_rep_f = c_feature
+                    c_rep_b = c_feature
+
+        if self.bidir_concat:
+            c_rep_length = 2*self.C_MAX_LENGTH
+            c_feature = ConcatLayer([c_rep_f,c_rep_b]) # (30,80,c_recurrent Units)
+        else:
+            c_rep_length = self.C_MAX_LENGTH
 
         # ------------------------------------------------------ Final Attention -------------------------------------------------------------
         if self.embedding_attention:
-            q_attention_embedding = EmbeddingLayer(WordDropoutLayer(question,p=0.5), input_size=self.vocab_size, output_size=10)
+            q_attention_embedding = EmbeddingLayer(question, input_size=self.vocab_size, output_size=10)
             regularize[q_attention_embedding] = 1.
-            q_attention_embedding = RepeatLayer(q_attention_embedding, repeats=self.MAX_N_CANDIDATES)
-            c_attention_embedding = EmbeddingLayer(WordDropoutLayer(candidates, p=0.5), input_size=self.vocab_size, output_size=10)
-            regularize[c_attention_embedding] = 1.
-            dot = MergeExpressionLayer([q_attention_embedding,c_attention_embedding], lambda X,Y: T.batched_tensordot(X,Y,axes=[2,2]), output_shape=(self.MAX_N_CANDIDATES,self.Q_MAX_LENGTH,self.C_MAX_LENGTH))
-        else:
-            dot = MergeExpressionLayer([repeat_q_feature,c_feature], lambda X,Y: T.batched_tensordot(X,Y,axes=[2,2]), output_shape=(self.MAX_N_CANDIDATES,self.Q_MAX_LENGTH,self.C_MAX_LENGTH))
+            repeat_q_feature = RepeatLayer(q_attention_embedding, repeats=self.MAX_N_CANDIDATES)
+            c_feature = EmbeddingLayer(candidates, input_size=self.vocab_size, output_size=10)
+            regularize[c_feature] = 1.
         if self.attention_units > 0:
-            dot = DenseLayer(dot, num_units=self.attention_units, nonlinearity=lasagne.nonlinearities.tanh)
+            combined = ConcatLayer([repeat_q_feature,c_feature])
+            match = DenseLayer(combined, num_units=self.attention_units, nonlinearity=lasagne.nonlinearities.tanh)
             if self.attention_dropout > 0:
-                dot = DropoutLayer(dot, p=self.attention_dropout)
+                match = DropoutLayer(match, p=self.attention_dropout)
+        else:
+            match = MergeExpressionLayer([repeat_q_feature,c_feature], lambda X,Y: T.batched_tensordot(X,Y,axes=[2,2]), output_shape=(self.MAX_N_CANDIDATES,self.Q_MAX_LENGTH,c_rep_length))
+        attention = DenseLayer(match, num_units=c_rep_length, nonlinearity=lasagne.nonlinearities.softmax)
+        attention = RepeatLayer(ReshapeLayer(attention, (-1, c_rep_length, 1)),repeats=self.recurrent_units, axis=2)
+        attended = ElemwiseMergeLayer([attention, c_feature], T.mul)
 
-        attention = DenseLayer(dot, num_units=self.C_MAX_LENGTH, nonlinearity=lasagne.nonlinearities.softmax)
-        print('attention',attention.output_shape)
-        attention = RepeatLayer(ReshapeLayer(attention, (-1, self.C_MAX_LENGTH, 1)),repeats=self.recurrent_units, axis=2)
-        c_feature = ElemwiseMergeLayer([attention, c_feature], T.mul)
-
-        # attention = DenseLayer(dot, num_units=self.recurrent_units, nonlinearity=lasagne.nonlinearities.softmax)
-        # attention = RepeatLayer(ReshapeLayer(attention, (-1, 1, self.recurrent_units)),repeats=self.C_MAX_LENGTH, axis=1)
-        # c_feature = ElemwiseMergeLayer([attention, c_feature], T.mul)
-        # print('attention',attention.output_shape)
-
-        # ----------------------------------------------- Global Candidate Prediction -------------------------------------------------------------
-
-        # for i in xrange(self.MAX_N_CANDIDATES):
-        #     out, rest = slice_out(c_feature, index=i, axis=0)
-        #     print('out',out.output_shape) #(1, 40, 50)
-        #     print('rest',rest.output_shape) #(29, 40, 50)
         # -------------------------------------------------- Candidate Prediction -------------------------------------------------
         reshaped_question = ReshapeLayer(RepeatLayer(q_forward_slice,repeats=self.MAX_N_CANDIDATES), (self.MAX_N_CANDIDATES, 1, self.recurrent_units))
-        print('reshaped_question', reshaped_question.output_shape)
-        feature = ConcatLayer([reshaped_question, c_feature], axis=1)
-        print('feature', feature.output_shape)
+        feature = ConcatLayer([reshaped_question, attended], axis=1)
 
         if self.out_recurrent_units > 0:
             feature = RecurrentLayer(feature, num_units=self.out_recurrent_units, only_return_final=True)
             if self.out_recurrent_dropout > 0:
                 feature = DropoutLayer(feature, p=self.out_recurrent_dropout)
         if self.dense_units > 0:
-            feature = DropoutLayer(DenseLayer(feature, num_units=self.dense_units, nonlinearity=lasagne.nonlinearities.tanh), p=self.dense_dropout)
+            feature = DenseLayer(feature, num_units=self.dense_units, nonlinearity=lasagne.nonlinearities.tanh)
+            if self.dense_dropout > 0:
+                feature = DropoutLayer(feature, p=self.dense_dropout)
         candidate_prediction_out = DenseLayer(feature, num_units=1, nonlinearity=lasagne.nonlinearities.sigmoid)
         
+        # ---------------------------------------------------------- Level 2 ------------------------------------------------------
+        
+        q_feature = DenseLayer(feature, num_units=self.recurrent_units, nonlinearity=lasagne.nonlinearities.sigmoid)
+        repeat_q_feature = ReshapeLayer(RepeatLayer(FeaturePoolLayer(q_feature, pool_size=self.MAX_N_CANDIDATES, axis=0, pool_function=T.max),self.MAX_N_CANDIDATES),(self.MAX_N_CANDIDATES,-1,self.recurrent_units))
+        feature = ConcatLayer([repeat_q_feature, attended], axis=1)
+        if self.out_recurrent_units > 0:
+            feature = RecurrentLayer(feature, num_units=self.out_recurrent_units, only_return_final=True)
+            if self.out_recurrent_dropout > 0:
+                feature = DropoutLayer(feature, p=self.out_recurrent_dropout)
+        if self.dense_units > 0:
+            feature = DenseLayer(feature, num_units=self.dense_units, nonlinearity=lasagne.nonlinearities.tanh)
+            if self.dense_dropout > 0:
+                feature = DropoutLayer(feature, p=self.dense_dropout)
+
+        print('feature',feature.output_shape)
+        candidate_prediction_out_2 = DenseLayer(feature, num_units=1, nonlinearity=lasagne.nonlinearities.sigmoid)
+
         # ------------------------------------------------------ LM Pretraining ---------------------------------------------------
         
         if self.end_p_epoch > 0:
@@ -125,7 +136,7 @@ class Attention(Base_Sep):
             lm_out = DenseLayer(lm_decoder, num_units=self.vocab_size, nonlinearity=lasagne.nonlinearities.softmax)
             return [candidate_prediction_out, lm_out, lm_target, regularize]
 
-        return [candidate_prediction_out, regularize]
+        return [candidate_prediction_out_2, regularize]
 if __name__ == '__main__':
     lstm = Attention('Attention')
     lstm.get_args()

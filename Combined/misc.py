@@ -62,30 +62,29 @@ def log(sentence, name):
 
 def read_model_data(load, name, model):
     if load == False:
-        return 0,100,0,0,0,0
+        return 0,100,0,0,0
     modelFile = os.path.join('./models/', '%s.%s' % (name, 'params'))
 
     if os.path.isfile(modelFile):
         print('Loading Model')
         with open(modelFile, 'rb') as f:
-            start_epoch,best_candidate_loss,best_candidate_f1,best_candidate_bias,\
-            best_question_f1,best_question_bias,params = pickle.load(f)
+            start_epoch, best_candidate_loss, best_candidate_f1,\
+            best_question_f1, best_question_bias, params = pickle.load(f)
         lasagne.layers.set_all_param_values(model,params)
-        return start_epoch,best_candidate_loss,best_candidate_f1,best_candidate_bias,\
+        return start_epoch,best_candidate_loss,best_candidate_f1,\
         best_question_f1,best_question_bias
     else:
         print('Model Not Found')
-        return 0,100,0,0,0,0
+        return 0,100,0,0,0
 
-def write_model_data(save, name, epoch, candidate_loss, candidate_f1, candidate_bias,
+def write_model_data(save, name, epoch, candidate_loss, candidate_f1,
     question_f1, question_bias, model):
     if save == False:
         return
     print('Saving Model')
     modelFile = os.path.join('./models/', '%s.%s' % (name, 'params'))
     with open(modelFile, 'wb') as f:
-        pickle.dump((epoch,
-            candidate_loss, candidate_f1, candidate_bias,
+        pickle.dump((epoch, candidate_loss, candidate_f1,
             question_f1, question_bias,
             lasagne.layers.get_all_param_values(model)), f, protocol=2)
 

@@ -2,6 +2,7 @@ import lasagne
 import theano.tensor as T
 import numpy as np
 from lasagne.utils import one_hot
+
 def define_lm_losses(lm_pred,lm_labels,hinge):
     # lm_labels = T.roll(input,1)
     # print 'lm_labels', theano.printing.debugprint(lm_labels, print_type=True)    
@@ -16,7 +17,7 @@ def define_lm_losses(lm_pred,lm_labels,hinge):
     lm_loss = T.mean(loss(lm_pred,lm_labels))
     return lm_loss
 
-def define_candidate_losses(candidate_pred,labels,outputs,hinge,cost_sensitive,ratio,l1,l2):
+def define_candidate_losses(candidate_pred,labels,outputs,hinge,cost_sensitive,l1,l2):
     if hinge:
         loss = lasagne.objectives.binary_hinge_loss
     else:
@@ -40,3 +41,10 @@ def define_candidate_losses(candidate_pred,labels,outputs,hinge,cost_sensitive,r
     argmax_candidate = T.argmax(candidate_pred)
     labels_any = T.any(labels)
     return [candidate_pred, labels, candidate_loss, candidate_pred[argmax_candidate], labels[argmax_candidate], labels_any]
+
+def grad_noise(rs, noise_eta, noise_decay, step):
+    if noise_eta > 0:
+        noise_std = noise_eta/(1+step)**noise_decay
+        return rs.normal(size=(1,),avg=0.0,std=noise_std)[0]
+    else:
+        return 0

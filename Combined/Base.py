@@ -52,7 +52,6 @@ class Base(object):
         self.best_question_f1 = 0
 
         self.best_candidate_loss = 100
-        self.best_candidate_bias = 0
         self.best_candidate_f1 = 0
 
         self.MAX_N_CANDIDATES = 30
@@ -68,6 +67,7 @@ class Base(object):
         ocm_in = T.matrix()
         labels_in = T.ivector()
         i = T.iscalar()
+        e = T.iscalar()
 
         outputs = self.define_layers(combined_in,masks_in,ocm_in)
         self.model = lasagne.layers.get_all_layers(outputs[:-1])
@@ -111,7 +111,7 @@ class Base(object):
         self.ocm_macro_batch = theano.shared(ocm, borrow=True)
         self.labels_macro_batch = theano.shared(labels, borrow=True)
 
-        self.train_fn = theano.function([i],
+        self.train_fn = theano.function([i,e],
             [train_candidates_pred, train_label, train_candidate_loss,
             train_top_candidate, train_top_candidate_label, train_labels_any], updates=updates,
             givens={
@@ -131,7 +131,7 @@ class Base(object):
             labels_in: self.labels_macro_batch[i]
         })
 
-        self.train_lm_fn = theano.function([i], train_lm_loss, updates=lm_updates,
+        self.train_lm_fn = theano.function([i,e], train_lm_loss, updates=lm_updates,
             givens={
             combined_in: self.combined_macro_batch[i],
             masks_in: self.masks_macro_batch[i],
@@ -157,7 +157,7 @@ class Base(object):
         else:
             raise Exception('Invalid split')
 
-    def pretrain(self,split):
+    def pretrain(self,split,epoch):
         lm_loss = 0
         i = self.get_i(split)
         macro_batch_count = self.labels[i].shape[0] // self.macro_batch_size
@@ -175,7 +175,7 @@ class Base(object):
             random.shuffle(shuffled_micro_batches)
             for mi,micro_batch_index in enumerate(shuffled_micro_batches):
                 if split == 'train':
-                    lm_loss += self.train_lm_fn(micro_batch_index)
+                    lm_loss += self.train_lm_fn(micro_batch_index, epoch)
                 else:
                     lm_loss += self.test_lm_fn(micro_batch_index)
                 if self.pbar:
@@ -186,7 +186,7 @@ class Base(object):
             random.shuffle(shuffled_remainder)
             for mi,remainder_index in enumerate(shuffled_remainder):
                 if split == 'train':
-                    lm_loss += self.train_lm_fn(remainder_index)
+                    lm_loss += self.train_lm_fn(remainder_index, epoch)
                 else:
                     lm_loss += self.test_lm_fn(remainder_index)
                 if self.pbar:
@@ -201,7 +201,7 @@ class Base(object):
             self.best_lm_loss = lm_loss
             write_lm_data(self.save, self.best_lm_loss, self.name, self.p_epoch, self.best_lm_loss, self.model)
         
-    def process(self,split):
+    def process(self,split,epoch=None,patience=0):
         candidate_loss = 0
         candidate_preds = []
         candidate_label = []
@@ -224,11 +224,12 @@ class Base(object):
             shuffled_micro_batches = range(micro_batch_count)
             random.shuffle(shuffled_micro_batches)
             for mi,micro_batch_index in enumerate(shuffled_micro_batches):
-                theano_func = self.train_fn
-                if split != 'train':
-                    theano_func = self.test_fn
-                [micro_candidate_pred,micro_candidate,micro_candidate_loss,
-                micro_top_candidate,micro_top_candidate_label,micro_labels_any] = theano_func(micro_batch_index)
+                if split == 'train':
+                    [micro_candidate_pred,micro_candidate,micro_candidate_loss,
+                    micro_top_candidate,micro_top_candidate_label,micro_labels_any] = self.train_fn(micro_batch_index,epoch)
+                else:
+                    [micro_candidate_pred,micro_candidate,micro_candidate_loss,
+                    micro_top_candidate,micro_top_candidate_label,micro_labels_any] = self.test_fn(micro_batch_index)
                 if self.pbar:
                     pbar.update(ma*micro_batch_count+mi)
                 candidate_loss += micro_candidate_loss
@@ -242,12 +243,12 @@ class Base(object):
             shuffled_remainder = range(remainder)
             random.shuffle(shuffled_remainder)
             for mi,remainder_index in enumerate(shuffled_remainder):
-                theano_func = self.train_fn
-                if split != 'train':
-                    theano_func = self.test_fn
-                [micro_candidate_pred,micro_candidate,micro_candidate_loss,
-                micro_top_candidate,micro_top_candidate_label,micro_labels_any] = theano_func(remainder_index)
-
+                if split == 'train':
+                    [micro_candidate_pred,micro_candidate,micro_candidate_loss,
+                    micro_top_candidate,micro_top_candidate_label,micro_labels_any] = self.train_fn(remainder_index,epoch)
+                else:
+                    [micro_candidate_pred,micro_candidate,micro_candidate_loss,
+                    micro_top_candidate,micro_top_candidate_label,micro_labels_any] = self.test_fn(remainder_index)
                 if self.pbar:
                     pbar.update(macro_batch_count*micro_batch_count+mi)
                 candidate_loss += micro_candidate_loss
@@ -267,15 +268,16 @@ class Base(object):
         top_candidate_label = np.rint(top_candidate_label).astype('int32')
         labels_any = np.asarray(labels_any).astype('bool')
 
-        return self.evaluate(split,candidate_loss,candidate_preds,candidate_label,top_candidate,top_candidate_label,labels_any)
+        return self.evaluate(split,candidate_loss,candidate_preds,candidate_label,top_candidate,top_candidate_label,labels_any,patience)
 
     def evaluate(self,split,
-        candidate_loss,candidate_preds,candidate_label,top_candidate,top_candidate_label,labels_any):
+        candidate_loss,candidate_preds,candidate_label,top_candidate,top_candidate_label,labels_any,
+        patience):
         test = False
         if split is 'test':
             test = True
         candidate_preds_flatten = candidate_preds.flatten()
-        corrected_candidate_pred, candidate_bias, candidate_prec,candidate_rec,candidate_f1 = self.find_best_threshold(candidate_preds_flatten,candidate_label,test,'binary')
+        # corrected_candidate_pred, candidate_bias, candidate_prec,candidate_rec,candidate_f1 = self.find_best_threshold(candidate_preds_flatten,candidate_label,test,'binary')
         # ----------------------------- candidate ranking ----------------------------------------
         rank = np.argsort(candidate_preds_flatten)[::-1]
         correct = 0.0
@@ -293,20 +295,11 @@ class Base(object):
             if prec+rec == 0:
                 f1_list.append(0.)
             else:
-                f1_list.append(100*2.*prec*rec/(prec+rec))
+                f1_list.append(2.*prec*rec/(prec+rec))
             if rec == 1:
                 break
         avg_candidate_prec = np.asarray(prec_list).mean()
-        print('max candidate IR F1 {:.2f}'.format(max(f1_list)))
-
-        # prec,rec,thresholds = precision_recall_curve(candidate_label,candidate_preds_flatten)
-        # f1_list = []
-        # for p,r in zip(prec,rec):
-            # f1_list.append(2.*p*r/(p+r))
-        # argmax_f1 = np.argmax(f1_list)
-        # ranked_candidate_f1 = f1_list[argmax_f1]
-        # ranked_candidate_bias = thresholds[argmax_f1]
-        # print('max candidate classification F1: {:.2f} bias: {:.2f}'.format(100*ranked_candidate_f1,ranked_candidate_bias))
+        candidate_f1 = max(f1_list)
 
         assert len(labels_any) == len(top_candidate_label), 'labels_any length: %r label length: %r' % (len(labels_any),len(top_candidate_label))
         assert len(top_candidate) == len(top_candidate_label), 'prediction length: %r label length: %r' % (len(top_candidate),len(top_candidate_label))
@@ -314,47 +307,54 @@ class Base(object):
         self.find_best_threshold_question(top_candidate,top_candidate_label,labels_any,test)
 
         self.print_scores(split,
-            candidate_loss,candidate_prec,candidate_rec,candidate_f1,candidate_bias,
+            candidate_loss,candidate_f1,
             question_prec,question_rec,question_f1,question_bias,
             avg_candidate_prec)
         if split == 'dev':
-            if question_f1 > self.best_question_f1:
+            if question_f1 > self.best_question_f1: # if best f1, save
                 self.save_best(
-                    candidate_loss, candidate_f1, candidate_bias,
+                    candidate_loss, candidate_f1,
                     question_f1, question_bias)
+            else: # if not best, then get best without replacing any 'bests'
+                if self.checkpoint:
+                    if patience > 0:
+                        read_model_data(self.load, self.name, self.model)
+                    else:
+                        patience = self.max_patience+1 # will lose 1
+                        print('lost patience, continuing without loading checkpoint')
         if test:
             sentence = self.name + ' lm_loss: {:.2f}\ndev candidate: {:.2f} question: {:.2f}\n test candidate: {:.2f} question: {:.2f}'.format(self.best_lm_loss, self.best_candidate_f1, self.best_question_f1, candidate_f1, question_f1)
             print(sentence)
             log(sentence, self.name)
 
-        return question_f1
+        return question_f1, patience
 
-    def find_best_threshold(self,scores,labels,test,average='binary'):
-        best_f1 = 0
-        best_bias = 0
-        best_pred = np.rint(scores).astype('int32')
-        if test==True:
-            best_pred = np.rint(scores+self.best_candidate_bias).astype('int32')
-            best_pred[best_pred > 1] = 1
-            best_bias = self.best_candidate_bias
-        prec = precision_score(labels,best_pred,average=average)
-        rec = recall_score(labels,best_pred,average=average)
-        f1 = 0
-        if prec + rec > 0:
-            f1 = 2*prec*rec/(prec+rec)
-        else:
-            for bias in np.arange(0,1,0.05):
-                pred = np.rint(scores+bias).astype('int32')
-                prec = precision_score(labels,pred,average=average)
-                rec = recall_score(labels,pred,average=average)
-                f1 = 0
-                if prec + rec > 0:
-                    f1 = 2*prec*rec/(prec+rec)
-                if f1 > best_f1:
-                    best_f1 = f1
-                    best_pred = pred
-                    best_bias = bias
-        return best_pred.astype(np.int32,copy=False),best_bias, prec,rec,f1
+    # def find_best_threshold(self,scores,labels,test,average='binary'):
+    #     best_f1 = 0
+    #     best_bias = 0
+    #     best_pred = np.rint(scores).astype('int32')
+    #     if test==True:
+    #         best_pred = np.rint(scores+self.best_candidate_bias).astype('int32')
+    #         best_pred[best_pred > 1] = 1
+    #         best_bias = self.best_candidate_bias
+    #     prec = precision_score(labels,best_pred,average=average)
+    #     rec = recall_score(labels,best_pred,average=average)
+    #     f1 = 0
+    #     if prec + rec > 0:
+    #         f1 = 2*prec*rec/(prec+rec)
+    #     else:
+    #         for bias in np.arange(0,1,0.05):
+    #             pred = np.rint(scores+bias).astype('int32')
+    #             prec = precision_score(labels,pred,average=average)
+    #             rec = recall_score(labels,pred,average=average)
+    #             f1 = 0
+    #             if prec + rec > 0:
+    #                 f1 = 2*prec*rec/(prec+rec)
+    #             if f1 > best_f1:
+    #                 best_f1 = f1
+    #                 best_pred = pred
+    #                 best_bias = bias
+    #     return best_pred.astype(np.int32,copy=False),best_bias, prec,rec,f1
 
     def find_best_threshold_question(self,scores,labels,labels_any,test):
         best_prec = 0
@@ -367,11 +367,11 @@ class Base(object):
         #     best_pred = np.rint(scores+self.best_question_bias).astype('int32')
         #     best_pred[best_pred > 1] = 1
         #     best_bias = self.best_question_bias
-        #     best_prec, best_rec, best_f1 = self.score_question_alt(best_pred,labels,labels_any)
+        #     best_prec, best_rec, best_f1 = self.score_question(best_pred,labels,labels_any)
         # else:
         for bias in np.arange(0,1,0.01):
             pred = np.rint(scores+bias).astype('int32')
-            prec, rec, f1 = self.score_question_alt(pred,labels,labels_any)
+            prec, rec, f1 = self.score_question(pred,labels,labels_any)
             # out = self.score_question(pred,labels,labels_any)
             # assert np.isclose(correctly_predicted_questions,out[3]), 'TP wrong %r %r' % (correctly_predicted_questions,out[3])
             # assert np.isclose(predicted_questions,out[4]), 'predicted questions wrong %r %r' % (predicted_questions,out[4])
@@ -388,7 +388,7 @@ class Base(object):
         return best_pred.astype(np.int32,copy=False),best_bias,best_prec,best_rec,best_f1
 
 
-    def score_question_alt(self,pred,labels,labels_any):
+    def score_question(self,pred,labels,labels_any):
         pred = pred.astype('int32')
         labels = labels.astype('int32')
         labels_any = labels_any.astype('int32')
@@ -402,87 +402,32 @@ class Base(object):
                 predicted_questions += 1
                 if labels[i] == 1:
                     correctly_predicted_questions += 1
-                    # print('correctly predicted:',i)
-                    # print('labels_any',labels_any[i])
-                    # print('labels',labels[i])
         if correctly_predicted_questions == 0 or predicted_questions == 0:
             return 0.0, 0.0, 0.0
         precision= float(correctly_predicted_questions)/predicted_questions
         recall = float(correctly_predicted_questions)/all_questions_with_answers
         f1 = (2*precision*recall)/(precision+recall) if (precision > 0.0 and recall > 0.0) else 0.0
-        # return precision,recall,f1,correctly_predicted_questions,predicted_questions,all_questions_with_answers
         return precision,recall,f1
-    # BROKEN
-    def score_question(self,predictions,labels,labels_any):
-        TP = 0.
-        candidate_FP = 0.
-        FP = 0.
-        FN = 0.
-        TN = 0.
-        pred_arr = []
-        label_arr = []
-        predictions = predictions.astype('int32')
-        labels = labels.astype('int32')
-        labels_any = labels_any.astype('int32')
-        for i,pred in enumerate(zip(predictions,labels)):
-            prediction = pred[0]
-            label = pred[1]
-            if labels_any[i]: # there exists an answer
-                if prediction == 1: # top prediction is positive
-                    if label == 1: # top prediction is correct
-                        TP += 1
-                        # print('tp:',i)
-                        # print('labels_any',labels_any[i])
-                        # print('labels',label)
-                    else:
-                        candidate_FP += 1 # top prediction is incorrect
-                else: # top prediction is negative
-                    FN += 1
-            else: # there does not exist an answer
-                assert labels[i] == 0, 'labels any wrong'
-                if prediction == 1:
-                    FP += 1 # predict candidate is an answer when no answer exists
-                else:
-                    TN += 1
-        if TP+FP == 0:
-            prec = 0.
-        else:
-            prec = TP/(TP+FP+candidate_FP)
-        if TP+FN == 0:
-            rec = 0.
-        else:
-            rec = TP/(TP+FN+candidate_FP) # the denominator is all 
-        
-        if prec + rec > 0:
-            f1 = 2.*prec*rec/(prec+rec)
-        else:
-            f1 = 0.
-
-        return prec,rec,f1,TP,TP+FP+candidate_FP,TP+FN+candidate_FP
 
     def save_best(self,
-        candidate_loss, candidate_f1, candidate_bias,
+        candidate_loss, candidate_f1,
         question_f1, question_bias):
         self.best_candidate_f1 = candidate_f1
         self.best_question_f1 = question_f1
         self.best_candidate_loss = candidate_loss
-
-        self.best_candidate_bias = candidate_bias
         self.best_question_bias = question_bias
 
-        write_model_data(self.save, self.name, self.epoch, candidate_loss, candidate_f1, candidate_bias,
+        write_model_data(self.save, self.name, self.epoch, candidate_loss, candidate_f1,
             question_f1, question_bias, self.model)
 
     def print_scores(self,split,
-        candidate_loss,candidate_prec,candidate_rec,candidate_f1,candidate_bias,
+        candidate_loss,candidate_f1,
         question_prec,question_rec,question_f1,question_bias,
         avg_candidate_prec):
-        c_string = '{} candidate L: {:.4f} P: {:.2f} R: {:.2f} F1: {:.2f} Bias: {:.2f}'.format(split, candidate_loss,100*candidate_prec,100*candidate_rec,100*candidate_f1, candidate_bias)
+        c_string = '{} candidate L: {:.4f} F1: {:.2f}, AP: {:.2f}'.format(split, candidate_loss,100*candidate_f1, 100*avg_candidate_prec)
         q_string = '{} question P: {:.2f} R: {:.2f} F1: {:.2f} Bias: {:.2f}'.format(split, 100*question_prec,100*question_rec,100*question_f1, question_bias)
-        ap_string = '{} average candidate precision: {:.2f}'.format(split,100*avg_candidate_prec)
         print(c_string)
         print(q_string)
-        print(ap_string)
 
     def load_data(self):
         self.combined = []
@@ -497,13 +442,13 @@ class Base(object):
         prefix = ''
         if (self.gn is True):
             prefix = 'GN_'
-        with open('../../data/'+prefix+'embedding.pickle', 'rb') as f:
+        with open('load/'+prefix+'embedding.pickle', 'rb') as f:
             self.embedding,self.vocab_size = pickle.load(f)
             self.EMBEDDING_DIM = self.embedding.shape[-1]
             print('Using '+prefix+' Vectors',self.EMBEDDING_DIM)            
         
         for split in splits:
-            filepath = os.path.join('../../data/', '%s%s_combined.%s' % (prefix,split, 'npz'))
+            filepath = os.path.join('load/', '%s%s_combined.%s' % (prefix,split, 'npz'))
             data = np.load(filepath)
             self.combined.append(data['combined'].astype('int32'))
             self.masks.append(data['masks'].astype('float32'))
@@ -595,7 +540,9 @@ class Base(object):
         parser.add_argument('--question_dropout',type=float,help='question input dropout',default=-1.)
         parser.add_argument('--c_embedding_dropout',type=float,help='candidate embedding dropout',default=-1.)
         parser.add_argument('--q_embedding_dropout',type=float,help='question embedding dropout',default=-1.)
-        parser.add_argument('--cost_sensitive',type=float,help='weigh positive class by its proportion')
+        parser.add_argument('--cost_sensitive',type=float,help='weigh positive class by its proportion',default=-1.0)
+        parser.add_argument('--g_noise',type=float,help='base variance of gradient noise ~[0.01,1]',default=-1.0)
+        parser.add_argument('--g_noise_decay',type=float,help='decay schedule of gradient noise',default=-1.0)
         parser.add_argument('--trainable_embedding',action='store_true',help='sets trainable tag for embeddings')
         parser.add_argument('--embedding_attention',action='store_true',help='uses embedding instead of recurrent layers for attention')
         parser.add_argument('--slice_final',action='store_true',help='slice final recurrent layer (stacks)')
@@ -605,9 +552,11 @@ class Base(object):
         parser.add_argument('--max_pool_size',type=int,help='size of max pooling layer',default=2)
         parser.add_argument('--leakiness',type=float,help='rectifier leakiness, [0,1] -> [relu, linear]',default = 0.0)
         parser.add_argument('--bidirectional',action='store_true',help='use bidirectional recurrent layers')
+        parser.add_argument('--bidir_concat',action='store_true',help='concatenate instead of summing forward and backward recurrent layers')
         parser.add_argument('--gn',action='store_true',help='use google news vectors')
         parser.add_argument('--lstm',action='store_true',help='use lstm instead of GRU')
-
+        parser.add_argument('--patience',type=int,help='patience resets to this value after improvement',default=0)
+        parser.add_argument('--checkpoint',action='store_true',help='loads best model whenever no improvement')
         parser.add_argument('--tmp',action='store_true',help='remove the saved model after evaluation')
         parser.add_argument('--hinge',action='store_true',help='use hinge loss instead of cross-entropy')
         parser.add_argument('--debug',action='store_true',help='sets debug')
@@ -642,6 +591,8 @@ class Base(object):
         self.out_recurrent_dropout = args.out_recurrent_dropout
         self.dense_dropout = args.dense_dropout
         self.cost_sensitive = args.cost_sensitive
+        self.noise_eta = args.g_noise
+        self.noise_decay = args.g_noise_decay
         self.trainable_embedding = args.trainable_embedding
         self.embedding_attention = args.embedding_attention
         self.slice_final = args.slice_final
@@ -650,13 +601,16 @@ class Base(object):
         self.average_pool_size = args.average_pool_size
         self.max_pool_size = args.max_pool_size
         self.leakiness = args.leakiness
+        self.checkpoint = args.checkpoint
+        self.max_patience = args.patience
         self.tmp = args.tmp
         if self.tmp:
             assert self.tmp == args.save == args.evaluate, 'you must save and evaluate your model if you want a temporary model'
-
+        assert self.checkpoint == (self.max_patience > 0), 'patience must be greater than 0 if you checkpoint'
         self.bidirectional = args.bidirectional
         self.gn = args.gn
         self.lstm = args.lstm
+        self.bidir_concat = args.bidir_concat
 
 
         # ----------------------------- additional options -----------------------------      
@@ -678,30 +632,28 @@ class Base(object):
 
     def pretrain_train_model(self):
         print('Starting Pretrain')
-        for p_epoch in xrange(self.start_p_epoch,self.end_p_epoch):
+        for epoch in xrange(self.start_p_epoch,self.end_p_epoch):
             start_time = time.time()
-            self.pretrain('train')
-            self.pretrain('dev')
-            print('Pretrain epoch: {} {} sec\n'.format(p_epoch+1,int(time.time()-start_time)))
+            self.pretrain('train', epoch)
+            self.pretrain('dev', epoch)
+            print('Pretrain epoch: {}\n'.format(epoch+1))
         
         print('Starting Train')
         epoch = self.start_epoch
-        max_patience = 2
-        patience = max_patience
+        patience = self.max_patience
         q_f1 = []
         while epoch < self.end_epoch+patience:
             start_time = time.time()
             epoch += 1
-            self.process('train')
-            q_f1.append(self.process('dev'))
-            if epoch == 1:
-                pass
-            elif len(q_f1)-1 == np.argmax(q_f1):
-                patience = max_patience
-                print('New best question F1: {:.2f}'.format(q_f1[-1]))
+            self.process('train', epoch=epoch, patience=patience)
+            question_f1, patience = self.process('dev', epoch=epoch, patience=patience)
+            q_f1.append(question_f1)
+            if len(q_f1)-1 == np.argmax(q_f1):
+                patience = self.max_patience
+                print('New best question F1: {:.2f}'.format(100*q_f1[-1]))
             else:
                 patience = max(0,patience-1)
-            print('Epoch: {} {} sec\n'.format(epoch,int(time.time()-start_time)))
+            print('Epoch: {} Remaining: {} Patience: {}\n'.format(epoch, self.end_epoch-epoch, patience))
 
     def evaluate_model(self):
         print('Starting Test')
@@ -716,15 +668,14 @@ class Base(object):
         if self.load == 1:
             self.start_p_epoch, self.best_lm_loss = read_lm_data(self.save, self.name, self.start_p_epoch, self.model)
         elif self.load == 2:
-            self.start_epoch,self.best_candidate_loss,self.best_candidate_f1,self.best_candidate_bias,\
+            self.start_epoch,self.best_candidate_loss,self.best_candidate_f1,\
             self.best_question_f1,self.best_question_bias = read_model_data(self.load,self.name, self.model)
         
         if self.end_epoch-self.start_epoch > 0 or self.end_p_epoch-self.start_p_epoch > 0:
             self.pretrain_train_model()
 
         if self.load > 0:
-            self.start_epoch,
-            self.start_epoch,self.best_candidate_loss,self.best_candidate_f1,self.best_candidate_bias,\
+            self.start_epoch,self.best_candidate_loss,self.best_candidate_f1,\
             self.best_question_f1,self.best_question_bias = read_model_data(self.load,self.name, self.model)
         
         if self.eval:
@@ -759,6 +710,11 @@ class Base(object):
         self.question_dropout = params['question_dropout'][0]
         self.c_embedding_dropout = params['c_embedding_dropout'][0]
         self.q_embedding_dropout = params['q_embedding_dropout'][0]
+        self.noise_eta = params['g_noise'][0]
+        self.noise_decay = params['g_noise_decay'][0]
+        self.checkpoint = params['checkpoint'][0]
+        self.max_patience = params['max_patience'][0]
+        self.bidir_concat = params['bidir_concat'][0]
         # self.leakiness = params['leakiness'][0]
         self.leakiness = 0
         self.embedding_attention = False
