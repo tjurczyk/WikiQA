@@ -3,6 +3,7 @@ import os
 import cPickle as pickle
 import lasagne
 import numpy as np
+import os.path
 
 def print_input(self, vocab2word):
     print('dev question shape {}'.format(self.questions[1].shape))
@@ -88,13 +89,12 @@ def write_model_data(save, name, epoch, candidate_loss, candidate_f1,
             question_f1, question_bias,
             lasagne.layers.get_all_param_values(model)), f, protocol=2)
 
-def remove_model_data(tmp, name):
-    if tmp == False:
-        return
-    modelFile = os.path.join('./models/', '%s.%s' % (name, 'params'))
-    os.remove(modelFile)
-    modelFile = os.path.join('./models/', '%s.%s' % (name, 'pretrain'))
-    os.remove(modelFile)
+def remove_model_data(remove, name):
+    if remove:
+        for f in ['params','pretrain']:
+            modelFile = os.path.join('./models/', '%s.%s' % (name, f))
+            if os.path.isfile(modelFile):
+                os.remove(modelFile)
 
 def read_lm_data(save, name, start_p_epoch, model):
     if save == False:
@@ -109,6 +109,7 @@ def read_lm_data(save, name, start_p_epoch, model):
     else:
         print('LM not found')
         return 0,1000.0
+
 def create_lm_target(q,c):
     q_roll = np.roll(q,1,axis=-1)
     q_roll = np.repeat(q_roll,c.shape[1],axis=1)

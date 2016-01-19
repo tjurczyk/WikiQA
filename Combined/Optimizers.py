@@ -25,10 +25,10 @@ def gd_adam(loss_or_grads, params, rs, e, noise_eta, noise_decay, learning_rate=
         m_t = beta1*m_prev + (1-beta1)*g_t
         v_t = beta2*v_prev + (1-beta2)*g_t**2
         step = a_t*m_t/(T.sqrt(v_t) + epsilon)
+        noise = T.cast(rs.normal(size=value.shape,avg=0.0,std=noise_eta*step/e**noise_decay),'float32')
 
         updates[m_prev] = m_t
         updates[v_prev] = v_t
-        noise = T.cast(rs.normal(size=value.shape,avg=0.0,std=noise_eta*step/e**noise_decay),'float32')
         updates[param] = param - step + noise
 
     updates[t_prev] = t

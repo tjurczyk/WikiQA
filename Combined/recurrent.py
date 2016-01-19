@@ -64,7 +64,7 @@ from .. import nonlinearities
 from .. import init
 from ..utils import unroll_scan
 
-from .base import MergeLayer
+from .base import MergeLayer, Layer
 from .input import InputLayer
 from .dense import DenseLayer
 from . import helper
@@ -121,18 +121,14 @@ class CustomRecurrentLayer(MergeLayer):
     nonlinearity : callable or None
         Nonlinearity to apply when computing new state (:math:`\sigma`). If
         None is provided, no nonlinearity will be applied.
-    hid_init : callable, np.ndarray, theano.shared or TensorVariable
-        Initializer for initial hidden state (:math:`h_0`).  If a
-        TensorVariable (Theano expression) is supplied, it will not be learned
-        regardless of the value of `learn_init`.
+    hid_init : callable, np.ndarray, theano.shared or :class:`Layer`
+        Initializer for initial hidden state (:math:`h_0`).
     backwards : bool
         If True, process the sequence backwards and then reverse the
         output again such that the output from the layer is always
         from :math:`x_1` to :math:`x_n`.
     learn_init : bool
-        If True, initial hidden values are learned. If `hid_init` is a
-        TensorVariable then the TensorVariable is used and
-        `learn_init` is ignored.
+        If True, initial hidden values are learned.
     gradient_steps : int
         Number of timesteps to include in the backpropagated gradient.
         If -1, backpropagate through the entire sequence.
@@ -210,12 +206,19 @@ class CustomRecurrentLayer(MergeLayer):
                  only_return_final=False,
                  **kwargs):
 
-        # This layer inherits from a MergeLayer, because it can have two
-        # inputs - the layer input, and the mask.  We will just provide the
-        # layer input as incomings, unless a mask input was provided.
+        # This layer inherits from a MergeLayer, because it can have three
+        # inputs - the layer input, the mask and the initial hidden state.  We
+        # will just provide the layer input as incomings, unless a mask input
+        # or initial hidden state was provided.
         incomings = [incoming]
+        self.mask_incoming_index = -1
+        self.hid_init_incoming_index = -1
         if mask_input is not None:
             incomings.append(mask_input)
+            self.mask_incoming_index = len(incomings)-1
+        if isinstance(hid_init, Layer):
+            incomings.append(hid_init)
+            self.hid_init_incoming_index = len(incomings)-1
 
         super(CustomRecurrentLayer, self).__init__(incomings, **kwargs)
 
@@ -308,11 +311,7 @@ class CustomRecurrentLayer(MergeLayer):
             self.nonlinearity = nonlinearity
 
         # Initialize hidden state
-        if isinstance(hid_init, T.TensorVariable):
-            if hid_init.ndim != len(hidden_to_hidden.output_shape):
-                raise ValueError(
-                    "When hid_init is provided as a TensorVariable, it should "
-                    "have the same shape as hidden_to_hidden.output_shape")
+        if isinstance(hid_init, Layer):
             self.hid_init = hid_init
         else:
             self.hid_init = self.add_param(
@@ -356,7 +355,10 @@ class CustomRecurrentLayer(MergeLayer):
             part of the sequence or not.  `mask` should be a matrix of shape
             ``(n_batch, n_time_steps)`` where ``mask[i, j] = 1`` when ``j <=
             (length of sequence i)`` and ``mask[i, j] = 0`` when ``j > (length
-            of sequence i)``.
+            of sequence i)``. When the hidden state of this layer is to be
+            pre-filled (i.e. was set to a :class:`Layer` instance) `inputs`
+            should have length at least 2, and `inputs[-1]` is the hidden state
+            to prefill with.
 
         Returns
         -------
@@ -366,7 +368,12 @@ class CustomRecurrentLayer(MergeLayer):
         # Retrieve the layer input
         input = inputs[0]
         # Retrieve the mask when it is supplied
-        mask = inputs[1] if len(inputs) > 1 else None
+        mask = None
+        hid_init = None
+        if self.mask_incoming_index > 0:
+            mask = inputs[self.mask_incoming_index]
+        if self.hid_init_incoming_index > 0:
+            hid_init = inputs[self.hid_init_incoming_index]
 
         # Input should be provided as (n_batch, n_time_steps, n_features)
         # but scan requires the iterable dimension to be first
@@ -422,7 +429,7 @@ class CustomRecurrentLayer(MergeLayer):
             # Skip over any input with mask 0 by copying the previous
             # hidden state; proceed normally for any input with mask 1.
             hid = step(input_n, hid_previous, *args)
-            hid_out = hid*mask_n + hid_previous*(1 - mask_n)
+            hid_out = T.switch(mask_n, hid, hid_previous)
             return [hid_out]
 
         if mask is not None:
@@ -433,10 +440,7 @@ class CustomRecurrentLayer(MergeLayer):
             sequences = input
             step_fun = step
 
-        # When hid_init is provided as a TensorVariable, use it as-is
-        if isinstance(self.hid_init, T.TensorVariable):
-            hid_init = self.hid_init
-        else:
+        if not isinstance(self.hid_init, Layer):
             # The code below simply repeats self.hid_init num_batch times in
             # its first dimension.  Turns out using a dot product and a
             # dimshuffle is faster than T.repeat.
@@ -516,17 +520,14 @@ class RecurrentLayer(CustomRecurrentLayer):
     nonlinearity : callable or None
         Nonlinearity to apply when computing new state (:math:`\sigma`). If
         None is provided, no nonlinearity will be applied.
-    hid_init : callable, np.ndarray, theano.shared or TensorVariable
-        Initializer for initial hidden state (:math:`h_0`).  If a
-        TensorVariable (Theano expression) is supplied, it will not be learned
-        regardless of the value of `learn_init`.
+    hid_init : callable, np.ndarray, theano.shared or :class:`Layer`
+        Initializer for initial hidden state (:math:`h_0`).
     backwards : bool
         If True, process the sequence backwards and then reverse the
         output again such that the output from the layer is always
         from :math:`x_1` to :math:`x_n`.
     learn_init : bool
-        If True, initial hidden values are learned. If `hid_init` is a
-        TensorVariable then `learn_init` is ignored.
+        If True, initial hidden values are learned.
     gradient_steps : int
         Number of timesteps to include in the backpropagated gradient.
         If -1, backpropagate through the entire sequence.
@@ -704,7 +705,7 @@ class LSTMLayer(MergeLayer):
         f_t &= \sigma_f(x_t W_{xf} + h_{t-1} W_{hf}
                + w_{cf} \odot c_{t-1} + b_f)\\
         c_t &= f_t \odot c_{t - 1}
-               + i_t\sigma_c(x_t W_{xc} + h_{t-1} W_{hc} + b_c)\\
+               + i_t \odot \sigma_c(x_t W_{xc} + h_{t-1} W_{hc} + b_c)\\
         o_t &= \sigma_o(x_t W_{xo} + h_{t-1} W_{ho} + w_{co} \odot c_t + b_o)\\
         h_t &= o_t \odot \sigma_h(c_t)
 
@@ -729,22 +730,16 @@ class LSTMLayer(MergeLayer):
     nonlinearity : callable or None
         The nonlinearity that is applied to the output (:math:`\sigma_h`). If
         None is provided, no nonlinearity will be applied.
-    cell_init : callable, np.ndarray, theano.shared or TensorVariable
-        Initializer for initial cell state (:math:`c_0`).  If a
-        TensorVariable (Theano expression) is supplied, it will not be learned
-        regardless of the value of `learn_init`.
-    hid_init : callable, np.ndarray, theano.shared or TensorVariable
-        Initializer for initial hidden state (:math:`h_0`).  If a
-        TensorVariable (Theano expression) is supplied, it will not be learned
-        regardless of the value of `learn_init`.
+    cell_init : callable, np.ndarray, theano.shared or :class:`Layer`
+        Initializer for initial cell state (:math:`c_0`).
+    hid_init : callable, np.ndarray, theano.shared or :class:`Layer`
+        Initializer for initial hidden state (:math:`h_0`).
     backwards : bool
         If True, process the sequence backwards and then reverse the
         output again such that the output from the layer is always
         from :math:`x_1` to :math:`x_n`.
     learn_init : bool
-        If True, initial hidden values are learned. If `hid_init` or
-        `cell_init` are TensorVariables then the TensorVariable is used and
-        `learn_init` is ignored for that initial state.
+        If True, initial hidden values are learned.
     peepholes : bool
         If True, the LSTM uses peephole connections.
         When False, `ingate.W_cell`, `forgetgate.W_cell` and
@@ -796,15 +791,32 @@ class LSTMLayer(MergeLayer):
                  unroll_scan=False,
                  precompute_input=True,
                  mask_input=None,
+                 attention=None,
                  only_return_final=False,
                  **kwargs):
 
-        # This layer inherits from a MergeLayer, because it can have two
-        # inputs - the layer input, and the mask.  We will just provide the
-        # layer input as incomings, unless a mask input was provided.
+        # This layer inherits from a MergeLayer, because it can have four
+        # inputs - the layer input, the mask, the initial hidden state and the
+        # inital cell state. We will just provide the layer input as incomings,
+        # unless a mask input, inital hidden state or initial cell state was
+        # provided.
         incomings = [incoming]
+        self.mask_incoming_index = -1
+        self.hid_init_incoming_index = -1
+        self.cell_init_incoming_index = -1
+        self.attention_index = -1
         if mask_input is not None:
             incomings.append(mask_input)
+            self.mask_incoming_index = len(incomings)-1
+        if isinstance(hid_init, Layer):
+            incomings.append(hid_init)
+            self.hid_init_incoming_index = len(incomings)-1
+        if isinstance(cell_init, Layer):
+            incomings.append(cell_init)
+            self.cell_init_incoming_index = len(incomings)-1
+        if attention is not None:
+            incomings.append(attention)
+            self.attention_index = len(incomings)-1
 
         # Initialize parent layer
         super(LSTMLayer, self).__init__(incomings, **kwargs)
@@ -878,22 +890,14 @@ class LSTMLayer(MergeLayer):
                 outgate.W_cell, (num_units, ), name="W_cell_to_outgate")
 
         # Setup initial values for the cell and the hidden units
-        if isinstance(cell_init, T.TensorVariable):
-            if cell_init.ndim != 2:
-                raise ValueError(
-                    "When cell_init is provided as a TensorVariable, it should"
-                    " have 2 dimensions and have shape (num_batch, num_units)")
+        if isinstance(cell_init, Layer):
             self.cell_init = cell_init
         else:
             self.cell_init = self.add_param(
                 cell_init, (1, num_units), name="cell_init",
                 trainable=learn_init, regularizable=False)
 
-        if isinstance(hid_init, T.TensorVariable):
-            if hid_init.ndim != 2:
-                raise ValueError(
-                    "When hid_init is provided as a TensorVariable, it should "
-                    "have 2 dimensions and have shape (num_batch, num_units)")
+        if isinstance(hid_init, Layer):
             self.hid_init = hid_init
         else:
             self.hid_init = self.add_param(
@@ -928,7 +932,15 @@ class LSTMLayer(MergeLayer):
             part of the sequence or not.  `mask` should be a matrix of shape
             ``(n_batch, n_time_steps)`` where ``mask[i, j] = 1`` when ``j <=
             (length of sequence i)`` and ``mask[i, j] = 0`` when ``j > (length
-            of sequence i)``.
+            of sequence i)``. When the hidden state of this layer is to be
+            pre-filled (i.e. was set to a :class:`Layer` instance) `inputs`
+            should have length at least 2, and `inputs[-1]` is the hidden state
+            to prefill with. When the cell state of this layer is to be
+            pre-filled (i.e. was set to a :class:`Layer` instance) `inputs`
+            should have length at least 2, and `inputs[-1]` is the hidden state
+            to prefill with. When both the cell state and the hidden state are
+            being pre-filled `inputs[-2]` is the hidden state, while
+            `inputs[-1]` is the cell state.
 
         Returns
         -------
@@ -938,7 +950,18 @@ class LSTMLayer(MergeLayer):
         # Retrieve the layer input
         input = inputs[0]
         # Retrieve the mask when it is supplied
-        mask = inputs[1] if len(inputs) > 1 else None
+        mask = None
+        hid_init = None
+        cell_init = None
+        attention = None
+        if self.mask_incoming_index > 0:
+            mask = inputs[self.mask_incoming_index]
+        if self.hid_init_incoming_index > 0:
+            hid_init = inputs[self.hid_init_incoming_index]
+        if self.cell_init_incoming_index > 0:
+            cell_init = inputs[self.cell_init_incoming_index]
+        if self.attention_index > 0:
+            attention = inputs[self.attention_index]
 
         # Treat all dimensions after the second as flattened feature dimensions
         if input.ndim > 3:
@@ -1020,7 +1043,6 @@ class LSTMLayer(MergeLayer):
 
         def step_masked(input_n, mask_n, cell_previous, hid_previous, *args):
             cell, hid = step(input_n, cell_previous, hid_previous, *args)
-
             # Skip over any input with mask 0 by copying the previous
             # hidden state; proceed normally for any input with mask 1.
             not_mask = 1 - mask_n
@@ -1029,7 +1051,22 @@ class LSTMLayer(MergeLayer):
 
             return [cell, hid]
 
-        if mask is not None:
+        def step_attention(input_n, mask_n, attention, cell_previous, hid_previous, *args):
+            # same as step masked but also weighed by attention vector
+            cell, hid = step(input_n, cell_previous, hid_previous, *args)
+            not_mask = 1 - mask_n
+            hid_out = hid*attention*mask_n + hid_previous*(1-attention)*not_mask
+            cell = cell*attention*mask_n + cell_previous*(1-attention)*not_mask
+
+            return [cell, hid_out]
+
+        if attention is not None:
+            mask = mask.dimshuffle(1, 0, 'x')
+            attention = attention.dimshuffle(1, 0, 'x')
+            sequences = [input, mask, attention]
+            step_fun = step_attention
+
+        elif mask is not None:
             # mask is given as (batch_size, seq_len). Because scan iterates
             # over first dimension, we dimshuffle to (seq_len, batch_size) and
             # add a broadcastable dimension
@@ -1041,15 +1078,11 @@ class LSTMLayer(MergeLayer):
             step_fun = step
 
         ones = T.ones((num_batch, 1))
-        if isinstance(self.cell_init, T.TensorVariable):
-            cell_init = self.cell_init
-        else:
+        if not isinstance(self.cell_init, Layer):
             # Dot against a 1s vector to repeat to shape (num_batch, num_units)
             cell_init = T.dot(ones, self.cell_init)
 
-        if isinstance(self.hid_init, T.TensorVariable):
-            hid_init = self.hid_init
-        else:
+        if not isinstance(self.hid_init, Layer):
             # Dot against a 1s vector to repeat to shape (num_batch, num_units)
             hid_init = T.dot(ones, self.hid_init)
 
@@ -1141,18 +1174,14 @@ class GRULayer(MergeLayer):
     hidden_update : Gate
         Parameters for the hidden update (:math:`c_t`): :math:`W_{xc}`,
         :math:`W_{hc}`, :math:`b_c`, and :math:`\sigma_c`.
-    hid_init : callable, np.ndarray, theano.shared or TensorVariable
-        Initializer for initial hidden state (:math:`h_0`).  If a
-        TensorVariable (Theano expression) is supplied, it will not be learned
-        regardless of the value of `learn_init`.
+    hid_init : callable, np.ndarray, theano.shared or :class:`Layer`
+        Initializer for initial hidden state (:math:`h_0`).
     backwards : bool
         If True, process the sequence backwards and then reverse the
         output again such that the output from the layer is always
         from :math:`x_1` to :math:`x_n`.
     learn_init : bool
-        If True, initial hidden values are learned. If `hid_init` is a
-        TensorVariable then the TensorVariable is used and
-        `learn_init` is ignored.
+        If True, initial hidden values are learned.
     gradient_steps : int
         Number of timesteps to include in the backpropagated gradient.
         If -1, backpropagate through the entire sequence.
@@ -1213,15 +1242,27 @@ class GRULayer(MergeLayer):
                  unroll_scan=False,
                  precompute_input=True,
                  mask_input=None,
+                 attention=None,
                  only_return_final=False,
                  **kwargs):
 
-        # This layer inherits from a MergeLayer, because it can have two
-        # inputs - the layer input, and the mask.  We will just provide the
-        # layer input as incomings, unless a mask input was provided.
+        # This layer inherits from a MergeLayer, because it can have three
+        # inputs - the layer input, the mask and the initial hidden state.  We
+        # will just provide the layer input as incomings, unless a mask input
+        # or initial hidden state was provided.
         incomings = [incoming]
+        self.mask_incoming_index = -1
+        self.hid_init_incoming_index = -1
+        self.attention_index = -1
         if mask_input is not None:
             incomings.append(mask_input)
+            self.mask_incoming_index = len(incomings)-1
+        if isinstance(hid_init, Layer):
+            incomings.append(hid_init)
+            self.hid_init_incoming_index = len(incomings)-1
+        if attention is not None:
+            incomings.append(attention)
+            self.attention = len(incomings)-1
 
         # Initialize parent layer
         super(GRULayer, self).__init__(incomings, **kwargs)
@@ -1263,7 +1304,8 @@ class GRULayer(MergeLayer):
 
         # Add in all parameters from gates
         (self.W_in_to_updategate, self.W_hid_to_updategate, self.b_updategate,
-         self.nonlinearity_updategate) = add_gate_params(updategate,'updategate')
+         self.nonlinearity_updategate) = add_gate_params(updategate,
+                                                         'updategate')
         (self.W_in_to_resetgate, self.W_hid_to_resetgate, self.b_resetgate,
          self.nonlinearity_resetgate) = add_gate_params(resetgate, 'resetgate')
 
@@ -1272,11 +1314,7 @@ class GRULayer(MergeLayer):
              hidden_update, 'hidden_update')
 
         # Initialize hidden state
-        if isinstance(hid_init, T.TensorVariable):
-            if hid_init.ndim != 2:
-                raise ValueError(
-                    "When hid_init is provided as a TensorVariable, it should "
-                    "have 2 dimensions and have shape (num_batch, num_units)")
+        if isinstance(hid_init, Layer):
             self.hid_init = hid_init
         else:
             self.hid_init = self.add_param(
@@ -1311,7 +1349,10 @@ class GRULayer(MergeLayer):
             part of the sequence or not.  `mask` should be a matrix of shape
             ``(n_batch, n_time_steps)`` where ``mask[i, j] = 1`` when ``j <=
             (length of sequence i)`` and ``mask[i, j] = 0`` when ``j > (length
-            of sequence i)``.
+            of sequence i)``. When the hidden state of this layer is to be
+            pre-filled (i.e. was set to a :class:`Layer` instance) `inputs`
+            should have length at least 2, and `inputs[-1]` is the hidden state
+            to prefill with.
 
         Returns
         -------
@@ -1321,8 +1362,16 @@ class GRULayer(MergeLayer):
         # Retrieve the layer input
         input = inputs[0]
         # Retrieve the mask when it is supplied
-        mask = inputs[1] if len(inputs) > 1 else None
-
+        mask = None
+        hid_init = None
+        attention = None
+        if self.mask_incoming_index > 0:
+            mask = inputs[self.mask_incoming_index]
+        if self.hid_init_incoming_index > 0:
+            hid_init = inputs[self.hid_init_incoming_index]
+        if self.attention_index > 0:
+            attention = inputs[self.attention_index]
+            
         # Treat all dimensions after the second as flattened feature dimensions
         if input.ndim > 3:
             input = T.flatten(input, 3)
@@ -1398,25 +1447,32 @@ class GRULayer(MergeLayer):
 
             # Skip over any input with mask 0 by copying the previous
             # hidden state; proceed normally for any input with mask 1.
-            not_mask = 1 - mask_n
-            hid = hid*mask_n + hid_previous*not_mask
+            hid = T.switch(mask_n, hid, hid_previous)
 
             return hid
 
-        if mask is not None:
-            # mask is given as (batch_size, seq_len). Because scan iterates
-            # over first dimension, we dimshuffle to (seq_len, batch_size) and
-            # add a broadcastable dimension
+        def step_attention(input_n, mask_n, attention, hid_previous, *args):
+            # same as step masked but also weighed by attention vector
+            hid = step(input_n, hid_previous, *args)
+            hid_out = hid*attention*mask_n + hid_previous*(1-attention)*(1-mask_n)
+            return [hid_out]
+
+        if attention is not None:
+            mask = mask.dimshuffle(1, 0, 'x')
+            attention = attention.dimshuffle(1, 0, 'x')
+            sequences = [input, mask, attention]
+            step_fun = step_attention
+
+        elif mask is not None:
             mask = mask.dimshuffle(1, 0, 'x')
             sequences = [input, mask]
             step_fun = step_masked
+
         else:
             sequences = [input]
             step_fun = step
 
-        if isinstance(self.hid_init, T.TensorVariable):
-            hid_init = self.hid_init
-        else:
+        if not isinstance(self.hid_init, Layer):
             # Dot against a 1s vector to repeat to shape (num_batch, num_units)
             hid_init = T.dot(T.ones((num_batch, 1)), self.hid_init)
 
@@ -1426,8 +1482,6 @@ class GRULayer(MergeLayer):
         # provide the input weights and biases to the step function
         if not self.precompute_input:
             non_seqs += [W_in_stacked, b_stacked]
-
-        hid_init = T.unbroadcast(hid_init,0)
 
         if self.unroll_scan:
             # Retrieve the dimensionality of the incoming layer

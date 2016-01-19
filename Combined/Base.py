@@ -529,10 +529,14 @@ class Base(object):
         parser.add_argument('--recurrent_layers',type=int,help='number of recurrent layers',default=1)
         parser.add_argument('--q_recurrent_layers',type=int,help='number of question recurrent layers',default=1)
         parser.add_argument('--c_recurrent_layers',type=int,help='number of candidate recurrent layers',default=1)
+        parser.add_argument('--sum_intermediate',action='store_true',help='sum the intermediate bidirectional layers')
         parser.add_argument('--out_recurrent_units',type=int,help='dimensionality of out recurrent layer',default=0)
+        parser.add_argument('--encoder_attention',action='store_true',help='enables or disables encoder attention')
+        parser.add_argument('--decoder_attention',action='store_true',help='enables or disables decoder attention')
         parser.add_argument('--recurrent_units',type=int,help='dimensionality of recurrent layer',default=512)
-        parser.add_argument('--attention_units',type=int,help='dimensionality of attention dense layer',default=512)
-        parser.add_argument('--dense_units',type=int,help='dimensionality of dense layer',default=512)
+        parser.add_argument('--attention_units',type=int,help='dimensionality of attention dense layer',default=-1)
+        parser.add_argument('--dense_units',type=int,help='dimensionality of dense layer',default=-1)
+        parser.add_argument('--attention_embedding_dropout',type=float,default=0.5)
         parser.add_argument('--attention_dropout',type=float,help='attention layer dropout',default=-1.)
         parser.add_argument('--out_recurrent_dropout',type=float,help='out recurrent layer dropout',default=-1.)
         parser.add_argument('--dense_dropout',type=float,help='dense layer dropout',default=-1.)
@@ -540,9 +544,12 @@ class Base(object):
         parser.add_argument('--question_dropout',type=float,help='question input dropout',default=-1.)
         parser.add_argument('--c_embedding_dropout',type=float,help='candidate embedding dropout',default=-1.)
         parser.add_argument('--q_embedding_dropout',type=float,help='question embedding dropout',default=-1.)
+        parser.add_argument('--c_recurrent_dropout',type=float,help='candidate intermediate recurrent layer dropout',default=-1.)
+        parser.add_argument('--q_recurrent_dropout',type=float,help='question intermediate recurrent layer dropout',default=-1.)
         parser.add_argument('--cost_sensitive',type=float,help='weigh positive class by its proportion',default=-1.0)
         parser.add_argument('--g_noise',type=float,help='base variance of gradient noise ~[0.01,1]',default=-1.0)
         parser.add_argument('--g_noise_decay',type=float,help='decay schedule of gradient noise',default=.6)
+        parser.add_argument('--attention_question',action='store_true',help='uses attention mechanism instead of final output of question')
         parser.add_argument('--trainable_embedding',action='store_true',help='sets trainable tag for embeddings')
         parser.add_argument('--embedding_attention',action='store_true',help='uses embedding instead of recurrent layers for attention')
         parser.add_argument('--slice_final',action='store_true',help='slice final recurrent layer (stacks)')
@@ -568,7 +575,7 @@ class Base(object):
         parser.add_argument('-p','--pretrain',type=int,help='final pretraining epoch',default=0)
         parser.add_argument('--pbar',action='store_true',help='use a progress bar, ugly file output')
         parser.add_argument('--rename',type=str,help='name modification')
-        parser.add_argument('--remove',type=str,help='remove the model on exit')
+        parser.add_argument('--remove',action='store_true',help='remove the model on exit')
         parser.add_argument('--check',action='store_true',help='input sanity check')
 
         args = parser.parse_args()
@@ -579,21 +586,28 @@ class Base(object):
         
         self.q_recurrent_layers = args.q_recurrent_layers
         self.c_recurrent_layers = args.c_recurrent_layers
+        self.sum_intermediate = args.sum_intermediate
         self.recurrent_layers = args.recurrent_layers
         self.out_recurrent_units = args.out_recurrent_units
         self.recurrent_units = args.recurrent_units
+        self.encoder_attention = args.encoder_attention
+        self.decoder_attention = args.decoder_attention
         self.attention_units = args.attention_units
         self.dense_units = args.dense_units
         self.attention_dropout = args.attention_dropout
+        self.attention_embedding_dropout = args.attention_embedding_dropout
         self.question_dropout = args.question_dropout
         self.candidate_dropout = args.candidate_dropout
         self.q_embedding_dropout = args.q_embedding_dropout
         self.c_embedding_dropout = args.c_embedding_dropout
+        self.q_recurrent_dropout = args.q_recurrent_dropout
+        self.c_recurrent_dropout = args.c_recurrent_dropout
         self.out_recurrent_dropout = args.out_recurrent_dropout
         self.dense_dropout = args.dense_dropout
         self.cost_sensitive = args.cost_sensitive
         self.noise_eta = args.g_noise
         self.noise_decay = args.g_noise_decay
+        self.attention_question = args.attention_question
         self.trainable_embedding = args.trainable_embedding
         self.embedding_attention = args.embedding_attention
         self.slice_final = args.slice_final

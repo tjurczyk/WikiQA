@@ -182,6 +182,7 @@ class Base_Sep(Base):
         self.q_masks = []
         self.c_masks = []
         self.labels = []
+        self.episode_mask = []
         if self.dry:
             splits = ['validate','validate','validate']
         else:
@@ -202,9 +203,12 @@ class Base_Sep(Base):
             self.q_masks.append(data['masks_q'].astype('float32'))
             self.c_masks.append(data['masks_c'].astype('float32'))
             self.labels.append(data['labels'].astype('int32'))
+            self.episode_mask.append(np.any(self.c_masks[-1],axis=2))
             data.close()
         if self.check_input:
             self.print_input(vocab2word)
+        print(self.episode_mask[-1].shape)
+        print(self.labels[-1].shape)
 
     def set_all(self, i, macro_batch_index, pretrain=False):
         q = self.questions[i][macro_batch_index * self.macro_batch_size: (macro_batch_index + 1) * self.macro_batch_size, :1, :self.Q_MAX_LENGTH]
