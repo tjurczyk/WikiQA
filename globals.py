@@ -2,7 +2,6 @@ import logging
 import os
 from optparse import OptionParser
 from enum import Enum
-from decomposition.syntactic import DCType, DCMetrics
 
 logging.basicConfig()
 logger = logging.getLogger('')
@@ -11,7 +10,7 @@ logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=lo
 
 # Options parse
 parser = OptionParser()
-parser.add_option("-g", "--generate", help="generate mode (train/test/dev/all)", dest="gen_mode")
+parser.add_option("-g", "--generate", help="generate mode (vectors/indexes)", dest="gen_mode")
 parser.add_option("-l", "--qlimit", help="limit of number of questions (generate mode)", dest="q_limit")
 parser.add_option("-e", "--experiment", help="experiment mode", dest="exp_mode")
 parser.add_option("--train", help="train data location (experiment mode)", dest="train_data")
@@ -40,7 +39,12 @@ lr_features = [
     "wo",
     "wo_idf",
     "q_len",
-    #"dependency",
+    "dependency",
+]
+
+lr_dep_features = [
+    #"string_word",
+    "emb_word"
 ]
 
 # Framework settings
@@ -63,8 +67,12 @@ dep_input_files = {'train': 'WikiQA_data/train.cnlp',
                    'validate': 'WikiQA_data/validate.cnlp'}
 
 # Syntactic module settings
-d_comparator = DCType.string_word
-d_metrics = DCMetrics.avg
+# comparator supported opts: "string_word", "emb_word"
+#d_comparator = "string_word"
+# metrics supported opts: "avg", "sum", "max"
+d_metrics = "max"
+# using word_form or lemma
+d_typing = "word_form"
 
 # Probably obsolete, will be removed
 normalize_numbers = False
@@ -102,6 +110,7 @@ def get_config():
 
 def get_printy_dict(config_dict, ordering_list):
     output = ""
+    print ("Config dict: %s" % config_dict)
     for order_item in ordering_list:
         output += order_item.ljust(18, ".")
         output += " " + str(config_dict[order_item]) + "\n"

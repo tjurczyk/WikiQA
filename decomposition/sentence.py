@@ -11,9 +11,10 @@ import utils
 
 
 class SentenceExtractor():
-    def __init__(self, features):
+    def __init__(self, features, word2vec):
         self.idf = None
         self.features = features
+        self.word2vec = word2vec
 
     def decompose_questions(self, questions):
         if "wo_idf" in self.features and self.idf is None:
@@ -39,11 +40,17 @@ class SentenceExtractor():
                     sample.append(lexical.word_co_occurrence_idf(question_entity.question, a, self.idf))
                 elif f == "q_len":
                     sample.append(lexical.question_length(question_entity.question))
-                elif f == "dep":
-                    pass
+                elif f == "dependency":
+                    for i in globals.lr_dep_features:
+                        sample.extend(syntactic.decompose(utils.get_sentence_words(question_entity.question),
+                                                          utils.get_sentence_words(a),
+                                                          question_entity.question_dep, question_entity.answer_dep[idy],
+                                                          i, self.word2vec))
 
             samples.append(sample)
 
+        # print("samples are: %s" % samples)
+        # sys.exit(0)
         return samples
 
     def build_idf(self, l_of_data_sets):

@@ -34,7 +34,14 @@ def experiment():
     questions['test'], voc, idf = load_questions_from_file('test', q_limit, vocabulary)
     logging.info("Questions loaded.")
 
-    word2vec = w2vec(vocabulary, filename='../GoogleNews-vectors-negative300.bin')
+    try:
+        word2vec = w2vec(vocabulary, filename=None)
+        word2vec.load_model()
+        logger.info("Word2vec model loaded.")
+    except IOError:
+        logger.info("Word2vec model couldn't load, building new one")
+        word2vec = w2vec(vocabulary, filename='../GoogleNews-vectors-negative300.bin')
+        word2vec.save_model()
 
     for question_set in ["train", "validate", "test"]:
         logger.info("Now working for set: %s" % question_set)
@@ -45,15 +52,24 @@ def experiment():
 
         for q in questions[question_set]:
             # Create a question vector
-            q_sampled = get_sentence_vector_list(q.question, word2vec)
+            if globals.gen_mode == "vectors":
+                q_sampled = get_sentence_vector_list(q.question, word2vec)
+            else:
+                q_sampled = get_sentence_word_list(q.question, word2vec)
             labels_q = []
 
             for idx, a in enumerate(q.answers):
-                a_sampled = get_sentence_vector_list(a, word2vec)
+                if globals.gen_mode == "vectors":
+                    a_sampled = get_sentence_vector_list(a, word2vec)
+                else:
+                    a_sampled = get_sentence_word_list(a, word2vec)
 
                 labels_q.append(int(idx in q.correct_answer))
                 #print("\nAdding sample\n")
-                samples.append(generate_sample(q_sampled, a_sampled))
+                if globals.gen_mode == "vectors":
+                    samples.append(generate_vector_sample(q_sampled, a_sampled))
+                else:
+                    samples.append(generate_word_sample(q_sampled, a_sampled, word2vec))
 
             labels.append(labels_q)
             sys.stdout.write("\rQuestions parsed: %d/%s" % (counter, q_limit if q_limit > -1 else "all"))
@@ -64,9 +80,10 @@ def experiment():
         sys.stdout.flush()
         logger.info("Input generated for %s" % question_set)
 
-        (map_valid, error_index) = validate_feature_map(samples)
-        if map_valid is False:
-            raise ValueError("Feature map is not symmetrical (matrix) and so cannot be used. Indexes of error: " + str(error_index))
+        if globals.gen_mode == "vectors":
+            (map_valid, error_index) = validate_feature_map(samples)
+            if map_valid is False:
+                raise ValueError("Feature map is not symmetrical (matrix) and so cannot be used. Indexes of error: " + str(error_index))
 
         data_set_path = globals.data_path + question_set + "."
         data_set_path += str(q_limit) if q_limit > -1 else "all"
@@ -209,26 +226,8 @@ def validate_feature_map(f_map):
     return True, -1
 
 
-def generate_sample(q_words, a_words):
+def generate_vector_sample(q_words, a_words):
     sample = []
-
-    # This is old code for multiple dimensions
-    #######################################################
-    # dim1 is from first word to last-1
-    #dim1 = pad_with_zeroes(q_words[:-1])
-    #dim1.extend(pad_with_zeroes(a_words[:-1]))
-
-    # dim2 is from second word to last
-    #dim2 = pad_with_zeroes(q_words[1:])
-    #dim2.extend(pad_with_zeroes(a_words[1:]))
-
-    #if len(dim1) is not 2*s_size or len(dim2) is not 2*s_size:
-    #    raise ValueError("Dim is not the right size. (dim1, dim2): " + str((len(dim1), len(dim2))) +
-    #                     "\nQuestion: " + str(q_words) + "\nAnswer: " + str(a_words))
-
-    #sample.append(dim1)
-    #sample.append(dim2)
-    #######################################################
 
     dim = pad_with_zeroes(q_words)
     # Add one extra list of zeroes (separator between q and a)
@@ -236,6 +235,33 @@ def generate_sample(q_words, a_words):
     dim.extend(pad_with_zeroes(a_words))
 
     sample.append(dim)
+
+    return sample
+
+
+def generate_word_sample(q_words, a_words, word2vec):
+    sample = []
+
+    sample.extend(q_words)
+    # pad up to 41
+    padded = [word2vec.get_word_id("_padding")] * (41 - len(q_words))
+    sample.extend(padded)
+
+    sample.extend(a_words)
+    padded = [word2vec.get_word_id("_padding")] * (81 - len(sample))
+    sample.extend(padded)
+
+
+    #dim = pad_with_zeroes(q_words)
+    # Add one extra list of zeroes (separator between q and a)
+    #dim.append([0]*globals.dimension)
+    #dim.extend(pad_with_zeroes(a_words))
+
+    #sample.append(dim)
+
+    #print ("q_words: %s, a_words: %s" % (q_words, a_words))
+    #print ("sample: %s" % sample)
+    #sys.exit(0)
 
     return sample
 
@@ -274,6 +300,20 @@ def get_sentence_vector_list(s, word2vec):
     return s_repr[:globals.s_size]
 
 
+def get_sentence_word_list(s, word2vec):
+    """
+    :rtype :list
+    """
+
+    s_repr = []
+
+    for word in get_sentence_words(s):
+        if word not in globals.p_marks:
+            s_repr.append(word2vec.get_word_id(word))
+
+    return s_repr[:globals.s_size]
+
+
 def get_config():
     config = {"q_limit": str(q_limit) if q_limit > -1 else "all"}
     return config
@@ -289,6 +329,11 @@ if __name__ == "__main__":
         q_limit = -1
     else:
         q_limit = int(globals.options.q_limit)
+
+    if globals.gen_mode not in ("vectors", "indexes"):
+        raise ValueError("gen_mode '%s' not recognized." % globals.gen_mode)
+
+    print("options.gen_mode: %s" % globals.gen_mode)
 
     # data_set_path = globals.data_path \
     #              + globals.gen_mode + "."

@@ -1,8 +1,6 @@
-from keras.layers.convolutional import *
-from keras.layers.core import *
-from keras.models import Sequential
-from numpy import array, ndarray, argmax
 import numpy
+from numpy import array, ndarray, argmax
+import theano
 import itertools
 import cPickle as pickle
 from pprint import pprint
@@ -11,6 +9,7 @@ from generate_input_file import load_questions_from_file
 from sklearn.linear_model import LogisticRegression
 from random import randint
 from random import shuffle
+from representation.wordrepresentation import Word2VecModel
 import sys
 
 import globals
@@ -75,17 +74,22 @@ def validate_on_lr(samples_train, samples_validate, samples_test,
     # Connect samples (to logistic regression) with predictions (output of NN)
     for sample, prediction in zip(samples_train, predictions_train):
         train_sample = sample[:]
-        train_sample.append(prediction[0])
+        train_sample.extend(prediction)
         X_train.append(train_sample)
+
+    #print ("X_train[:3]: ")
+    #for xx in X_train[:3]:
+    #    print("item: %s" % xx)
+    #sys.exit(0)
 
     for sample, prediction in zip(samples_validate, predictions_validate):
         validate_sample = sample[:]
-        validate_sample.append(prediction[0])
+        validate_sample.extend(prediction)
         X_validate.append(validate_sample)
 
     for sample, prediction in zip(samples_test, predictions_test):
         test_sample = sample[:]
-        test_sample.append(prediction[0])
+        test_sample.extend(prediction)
         X_test.append(test_sample)
 
     globals.logger.info("Training and testing Logistic Regression to validate...")
@@ -117,25 +121,7 @@ def test_lr_on_data(X_train, y_train, X_validate, y_validate, X_test, y_test, ep
                precision_test, recall_test, f1_test)
         results.append(res)
 
-
-    # best_threshold_validate = find_threshold_logistic(y_validate, predictions_val, predictions_val)
-    # precision_val, recall_val, f1_val = evaluate_with_threshold(y_validate, predictions_val, predictions_val,
-    #                                                             best_threshold_validate)
-    # globals.logger.info("Found threshold: %f. Precision/recall/f1 over validation set: %f/%f/%f" %
-    #                     (best_threshold_validate, precision_val, recall_val, f1_val))
-    #
-    # # Test model on test set
-    # predictions_test = lr.predict_proba(X_test)
-    # predictions_test = array([i[-1] for i in predictions_test])
-    # #best_threshold_test = find_threshold_logistic(y_test, predictions_test, predictions_test, verbose=True)
-    # precision, recall, f1 = evaluate_with_threshold(y_test, predictions_test, predictions_test, best_threshold_validate)
-    # #globals.logger.info("Found threshold: %f. Precision/recall/f1 over test set: %f/%f/%f" %
-    # #                    (best_threshold_test, precision, recall, f1))
-    # globals.logger.info("On threshold from validate. Precision/recall/f1 over test set: %f/%f/%f" %
-    #                     (precision, recall, f1))
-
-    #return precision, recall, f1
-    return 0,0,0
+    return 0, 0, 0
 
 
 def test_model(model, X_test, y_test):
@@ -152,8 +138,6 @@ def test_model(model, X_test, y_test):
 
 
 def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
-    model = cnn.get_cnn("regular")
-
     y_train_flatted = list(itertools.chain(*y_train))
     nb_batch = len(X_train)/batch_size + 1
 
@@ -165,7 +149,25 @@ def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
     questions_validate, v, idf = load_questions_from_file("validate", q_limit['validate'])
     questions_test, v, idf = load_questions_from_file("test", q_limit['test'])
 
-    se = SentenceExtractor(globals.lr_features)
+    word2vec = None
+    try:
+        word2vec = Word2VecModel(None, filename=None)
+        word2vec.load_model()
+        globals.logger.info("word2vec model loaded.")
+    except IOError:
+        raise RuntimeError("Couldn't load word2vec")
+
+    # build initial_weights
+    initial_weights = word2vec.get_indexes_vecs()
+    #initial_weights = None
+
+    #print ("initial weights[:5]: %s" % initial_weights[:5])
+    #print ("initial weights[-5:]: %s" % initial_weights[-5:])
+    #print("length of initial weights is: %s" % len(initial_weights))
+
+    model = cnn.get_cnn("regular", initial_weights)
+
+    se = SentenceExtractor(globals.lr_features, word2vec)
     se.build_idf([questions_train, questions_validate, questions_test])
 
     # Create samples for loaded questions
@@ -189,36 +191,14 @@ def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
                                                              accuracy=True)
             progress_bar.add(batch_size, values=[("train loss", train_loss),("train accuracy:", train_accuracy)])
 
-        # Check the score on the validation data
-        #results_val = test_model(model, X_validate, y_validate)
-        #best_threshold = find_threshold(y_validate, results_val["y_predicted_scores"], results_val["y_predicted_scores"])
-        #precision_val, recall_val, f1_val = evaluate_with_threshold(y_validate, results_val["y_predicted_scores"],
-        #                                                            results_val["y_predicted_scores"],
-        #                                                            best_threshold)
-
-        # Check the score on the test data
-        #results_test = test_model(model, X_test, y_test)
-        #precision_test, recall_test, f1_test = evaluate_with_threshold(y_test, results_test["y_predicted_scores"],
-        #                                                               results_test["y_predicted_scores"],
-        #                                                               best_threshold)
-
-        #nn_string = "NN tests:\n" + "Threshold".ljust(40, ".") + " %.4f" + "\nOver validation set\n" \
-        #            + "validation loss, validation acc".ljust(40, ".") + " %.4f %.4f\n" \
-        #            + "precision, recall, f1".ljust(40, ".") + " %.4f %.4f %.4f\n" \
-        #            + "Over test set\n" \
-        #            + "test loss, test acc".ljust(40, ".") + " %.4f %.4f\n" \
-        #            + "precision, recall, f1".ljust(40, ".") + " %.4f %.4f %.4f\n" \
-
-        #globals.logger.info(nn_string % (best_threshold, results_val['test_loss'], results_val['test_accuracy'],
-        #                                 precision_val, recall_val, f1_val,
-        #                                 results_test['test_loss'], results_test['test_accuracy'],
-        #                                 precision_test, recall_test, f1_test))
-
         # Now evaluate with logistic regression
         # Get predictions from NN
-        predictions_train = model.predict(X_train)
-        predictions_validate = model.predict(X_validate)
-        predictions_test = model.predict(X_test)
+        predictions_train = prepare_predictions(X_train, model, add_logistic_weights=False)
+        predictions_validate = prepare_predictions(X_validate, model, add_logistic_weights=False)
+        predictions_test = prepare_predictions(X_test, model, add_logistic_weights=False)
+
+        #print("predictions_train[:3]: %s" % predictions_train[:3])
+        #sys.exit(0)
 
         # Evaluate on logistic regression
         precision, recall, f1 = validate_on_lr(samples_train, samples_validate, samples_test,
@@ -242,6 +222,39 @@ def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
         print "LR -> %s\t" \
               "val precision: %.4f, val recall: %.4f, val F1: %.4f, " \
               "test precision: %.4f, test recall: %.4f, test F1: %.4f" % r
+
+    sorted_trigger_results_test = sorted(results, key=lambda res: res[6], reverse=True) # according to dev F1
+    for r in sorted_trigger_results_test[:5]:
+        print "Sorted by test, LR -> %s\t" \
+              "val precision: %.4f, val recall: %.4f, val F1: %.4f, " \
+              "test precision: %.4f, test recall: %.4f, test F1: %.4f" % r
+
+    return sorted_trigger_results[0]
+
+
+def prepare_predictions(X, model, add_logistic_weights=False):
+    """
+    This method prepares output from neural network to be
+    added to the logistic regression
+    """
+
+    nn_predictions = model.predict(X)
+
+    predictions = []
+
+    for i in nn_predictions:
+        predictions.append([i[0],])
+
+    # If add logistic weights, add question and answer vectors to the array
+    if add_logistic_weights is True:
+        get_3rd_layer_output = theano.function([model.layers[0].input],
+                                       model.layers[3].get_output(train=False))
+
+        output_vectors = get_3rd_layer_output(X.astype('float32'))
+        for x, y in zip(predictions, output_vectors):
+            x.extend(y)
+
+    return predictions
 
 
 def shuffle_set(X, y):
@@ -401,9 +414,19 @@ def test_nn_logistic():
     X_train, y_train = load_data(train_data, globals.nn_features_file, globals.nn_labels_file)
     X_validate, y_validate = load_data(validate_data, globals.nn_features_file, globals.nn_labels_file)
     X_test, y_test = load_data(test_data, globals.nn_features_file, globals.nn_labels_file)
+    highest_scores = []
 
-    train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test)
+    for i in xrange(3):
+        globals.logger.info("Starting run %s" % i)
+        highest_scores.append(train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test))
+        del results[:]
 
+    globals.logger.info("Finished all runs, all tops:")
+
+    for r in highest_scores:
+        print "LR -> %s\t" \
+              "val precision: %.4f, val recall: %.4f, val F1: %.4f, " \
+              "test precision: %.4f, test recall: %.4f, test F1: %.4f" % r
 
 def test_idf_build():
     questions_train, vocabulary, idf = load_questions_from_file("train", q_limit['train'])
@@ -415,10 +438,10 @@ def test_idf_build():
 
     y_train_flatten = list(itertools.chain(*y_train))
 
-    build_idf([questions_train, questions_validate, questions_test])
-    samples = decompose_questions(questions_train)
+    #build_idf([questions_train, questions_validate, questions_test])
+    #samples = decompose_questions(questions_train)
 
-    print("Samples len: %d, y_train_flatten len: %d" % (len(samples), len(y_train_flatten)))
+    #print("Samples len: %d, y_train_flatten len: %d" % (len(samples), len(y_train_flatten)))
 
     #samples = samples[:3]
 
@@ -426,15 +449,15 @@ def test_idf_build():
 
     e = 0
 
-    print("%s" % "wo".ljust(10, " ") + " " + "wo_idf".ljust(30, " ") + " " + "q_len".ljust(10, " ")
-          + " " + "wo_answers".ljust(30, " ") + " " + "idf_avg".ljust(30, " ")
-          + " " + "idf_norm".ljust(30, " ") + " " + "label")
-    for idx, sample in enumerate(samples):
-        print("%s, %s" % (str(sample[0]).ljust(10, " ") + " " + str(sample[1]).ljust(30, " ")
-                          + " " + str(sample[2]).ljust(10, " ") + " " + str(sample[3]).ljust(30, " ")
-                          + " " + str(sample[4]).ljust(30, " ") + " " + str(sample[5]).ljust(30, " ")
-                          + " ", y_train_flatten[e]))
-        e += 1
+    #print("%s" % "wo".ljust(10, " ") + " " + "wo_idf".ljust(30, " ") + " " + "q_len".ljust(10, " ")
+          # + " " + "wo_answers".ljust(30, " ") + " " + "idf_avg".ljust(30, " ")
+          # + " " + "idf_norm".ljust(30, " ") + " " + "label")
+    # for idx, sample in enumerate(samples):
+    #     print("%s, %s" % (str(sample[0]).ljust(10, " ") + " " + str(sample[1]).ljust(30, " ")
+    #                       + " " + str(sample[2]).ljust(10, " ") + " " + str(sample[3]).ljust(30, " ")
+    #                       + " " + str(sample[4]).ljust(30, " ") + " " + str(sample[5]).ljust(30, " ")
+    #                       + " ", y_train_flatten[e]))
+    #     e += 1
 
     #pprint(samples[:30])
 
@@ -447,7 +470,10 @@ def get_config():
               "nb_epoch": nb_epoch,
               "nb_filters": globals.nb_filters,
               "batch_size": batch_size,
-              "lr_features": globals.lr_features}
+              "lr_dep_metrics": globals.d_metrics,
+              "lr_dep_typing": globals.d_typing,
+              "lr_features": globals.lr_features,
+              "lr_dep_features": globals.lr_dep_features}
     return config
 
 
@@ -478,7 +504,8 @@ if __name__ == "__main__":
         else "all"
 
     print("Experiment mode options:")
-    p_order = ['exp_mode', 'lr_features', 'nb_epoch', 'nb_filters', 'batch_size', 'train_data', 'validation_data', 'test_data']
+    p_order = ['exp_mode', 'lr_features', 'lr_dep_features', 'lr_dep_metrics', 'lr_dep_typing', 'nb_epoch',
+               'nb_filters', 'batch_size', 'train_data', 'validation_data', 'test_data']
     print(globals.get_printy_dict(get_config(), p_order))
 
     if globals.exp_mode == "test_nn_logistic":

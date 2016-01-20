@@ -1,19 +1,21 @@
 from keras.layers.convolutional import *
 from keras.layers.core import *
 from keras.models import Sequential
+from keras.layers.embeddings import Embedding
 
 import extras
 import globals
 
-def get_cnn(nn_type="regular"):
+
+def get_cnn(nn_type="regular", embedding_layer_weights=None):
     model = None
 
     if nn_type == "regular":
-        model = build_regular_model()
-    elif nn_type == "multi-ngram":
-        model = build_ngram_model()
-    elif nn_type == "with-logistic":
-        model = build_regular_model_with_logistic()
+        model = build_regular_model(embedding_layer_weights)
+    #elif nn_type == "multi-ngram":
+    #    model = build_ngram_model()
+    #elif nn_type == "with-logistic":
+    #    model = build_regular_model_with_logistic()
     else:
         raise ValueError("Unsupported model option. Provided: %s" % nn_type)
 
@@ -23,19 +25,25 @@ def get_cnn(nn_type="regular"):
     return model
 
 
-def build_regular_model():
+def build_regular_model(embedding_layer_weights):
     model = Sequential()
 
     # Convolution layer with its activation
-    model.add(Convolution2D(globals.nb_filters, 1, 2, globals.dimension))
+    if embedding_layer_weights is not None:
+        model.add(Embedding(36983, 300, weights=[embedding_layer_weights,]))
+        model.add(Reshape((1, (globals.s_size*2)+1, globals.dimension)))
+
+    model.add(Convolution2D(globals.nb_filters, 2, globals.dimension,
+                            input_shape=(1, (globals.s_size*2)+1, globals.dimension)))
     model.add(Activation('tanh'))
 
     # Pooling
-    model.add(extras.AveragePooling2D(poolsize=(globals.s_size, 1)))
+    #model.add(extras.AveragePooling2D(poolsize=(globals.s_size, 1)))
+    model.add(MaxPooling2D(pool_size=(globals.s_size, 1)))
 
     # Flattening and Dense Layer
     model.add(Flatten())
-    model.add(Dense(2*globals.nb_filters, 1))
+    model.add(Dense(1))
 
     # Activation at the end is sigmoid.
     model.add(Activation('sigmoid'))
