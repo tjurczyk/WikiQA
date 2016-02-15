@@ -98,6 +98,10 @@ def experiment():
         pickle.dump(samples, f_samples, protocol=2)
         f_samples.close()
 
+        # Create text dumps
+        # Single q-a pair (81 * 300 numbers per row)
+        pack_into_to_txt(samples, data_set_path, "raw.samples")
+
         f_labels = open(data_set_path + globals.nn_labels_file, "wb")
         pickle.dump(labels, f_labels, protocol=2)
         f_labels.close()
@@ -171,6 +175,10 @@ def load_questions_from_file(mode, q_limit, vocabulary=None):
                 question.add_correct_answer(answers_count)
 
             answers_count += 1
+
+    questions.append(question)
+
+    print ("len of questions: %d" % len(questions))
 
     # Calculate idf
     for k, v in vocabulary.items():
@@ -298,6 +306,26 @@ def get_sentence_vector_list(s, word2vec):
             s_repr.append(s_repr_word)
 
     return s_repr[:globals.s_size]
+
+
+def pack_into_to_txt(samples, data_path, filename):
+    f_samples = open(data_path + filename, "w")
+
+    print ("Sample len: %d" % (len(samples)))
+
+    for i in samples:
+        #iter = 0
+        for row in i[0]:
+            for val in row:
+                f_samples.write(str(val) + " ")
+                #iter += 1
+        #print ("For single line, I printed: %d" % iter)
+        f_samples.write("\n")
+
+
+    #for i in samples:
+    #    []
+
 
 
 def get_sentence_word_list(s, word2vec):
