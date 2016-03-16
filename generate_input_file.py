@@ -100,7 +100,7 @@ def experiment():
 
         # Create text dumps
         # Single q-a pair (81 * 300 numbers per row)
-        pack_into_to_txt(samples, data_set_path, "raw.samples")
+        # pack_into_to_txt(samples, data_set_path, "raw.samples")
 
         f_labels = open(data_set_path + globals.nn_labels_file, "wb")
         pickle.dump(labels, f_labels, protocol=2)

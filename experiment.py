@@ -139,7 +139,12 @@ def test_model(model, X_test, y_test):
 
 def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
     y_train_flatted = list(itertools.chain(*y_train))
-    nb_batch = len(X_train)/batch_size + 1
+    nb_batch = len(X_train)/batch_size
+
+    if len(X_train) % batch_size != 0:
+        nb_batch += 1
+
+    print ("len X_train: %d, nb_batch: %d, batch_size: %d" % (len(X_train), nb_batch, batch_size))
 
     best_f1 = 0.0
     best_f1_index = 0
@@ -191,6 +196,7 @@ def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
                                                              accuracy=True)
             progress_bar.add(batch_size, values=[("train loss", train_loss),("train accuracy:", train_accuracy)])
 
+        print ("After")
         # Now evaluate with logistic regression
         # Get predictions from NN
         predictions_train = prepare_predictions(X_train, model, add_logistic_weights=False)
