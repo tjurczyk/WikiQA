@@ -75,7 +75,7 @@ def experiment():
         labels = np.asarray(labels,dtype=np.float32)
         q_masks = np.asarray(q_masks,dtype=np.float32)
         c_masks = np.asarray(c_masks,dtype=np.float32)
-        with open('./triggering/' +question_set+ '.npz','w') as f:
+        with open('./triggering/'+question_set+ '.npz','w') as f:
             np.savez(f, questions=questions, contexts=contexts, labels=labels, c_masks=c_masks, q_masks=q_masks)
 def load_questions_from_file(mode, q_limit, vocabulary=None):
     questions = []

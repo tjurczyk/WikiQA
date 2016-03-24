@@ -33,9 +33,10 @@ def parse():
     questions_f['validate'], _ = load_questions_from_file('validate', q_limit, vocabulary)
     questions_f['test'], _ = load_questions_from_file('test', q_limit, vocabulary)
     print('loading embeddings')
-    embedding = Word2Vec.load_word2vec_format('/home/mike/data/GoogleNews-vectors-negative300.bin', binary=True)
-    dim = 300
-
+    # embedding = Word2Vec.load_word2vec_format('/home/mike/data/GoogleNews-vectors-negative300.bin', binary=True)
+    # dim = 300
+    embedding = Word2Vec.load_word2vec_format('/home/mike/data/wiki_nyt.skip.simplified.low.200.vectors.bin', binary=True)
+    dim = 200
     max_n_candidates, maxlen_questions, maxlen_candidates = find_maxes(questions_f)
 
     word2vocab = defaultdict(default_vocab)     
@@ -45,7 +46,7 @@ def parse():
     known = 0
     unknown = 0
 
-    vocab2word[0] = '' # padding
+    vocab2word[0] = ''
     vocab2word[1] = '<END>'
     vocab2word[2] = '<UNK>'
 
@@ -75,71 +76,26 @@ def parse():
             unknown += 1
 
     print vocab_size,unknown
-    # with open('./triggering/data/GN_embedding.pickle', 'wb') as f:
-        # pickle.dump([np.asarray(newEmbedding,np.float32),vocab_size],f,protocol=2)
-
-    # embedding = Word2Vec.load_word2vec_format('/home/mike/data/wiki_nyt.skip.simplified.low.200.vectors.bin', binary=True)
-    # dim = 200
-    # word2vocab = defaultdict(default_vocab)     
-    # vocab2word = defaultdict(default_word)
-    # word_set = vocabulary.keys()
-    # vocab_size = 3
-    # known = 0
-    # unknown = 0
-
-    # vocab2word[0] = '' # padding
-    # vocab2word[1] = '<END>'
-    # vocab2word[2] = '<UNK>'
-
-    # word2vocab[''] = 0
-    # word2vocab['<END>'] = 1
-    # word2vocab['<UNK>'] = 2
-
-    # newEmbedding = [[0]*dim,[0]*dim,[0]*dim] # empty, end, unknown
-    # for word in word_set:
-    #     word = re.sub("\d", "0", word)
-    #     '''
-    #     if word in embedding:
-    #         newEmbedding.append(embedding[word])
-    #     else:
-    #         newEmbedding.append([0]*dim)
-    #         unknown += 1
-    #     word2vocab[word] = vocab_size
-    #     vocab2word[vocab_size] = word
-    #     '''
-    #     if word in embedding:
-    #         newEmbedding.append(embedding[word])
-    #         word2vocab[word] = vocab_size
-    #         vocab2word[vocab_size] = word
-    #         vocab_size +=1
-    #     else:
-    #         word2vocab[word] = 2
-    #         unknown += 1
-
-    # print vocab_size,unknown
-    # with open('./triggering/data/embedding.pickle', 'wb') as f:
-    #     pickle.dump([np.asarray(newEmbedding,np.float32),vocab_size],f,protocol=2)
-
-    # pickle.dump([np.asarray(newEmbedding,np.float32),word2vocab,vocab2word,vocab_size],f,protocol=2)
-
+    with open('./triggering/data/embedding.pickle', 'wb') as f:
+        pickle.dump([np.asarray(newEmbedding,np.float32),word2vocab,vocab2word,vocab_size],f,protocol=2)
+    
     for question_set in ["train", "validate", "test"]:
         print("Now working for set: %s" % question_set)
         questions_split = questions_f[question_set]
         n_questions = len(questions_split)
-        questions = np.zeros((n_questions,1,maxlen_questions),dtype=np.int32)
-        candidates = np.zeros((n_questions,max_n_candidates,maxlen_candidates),dtype=np.int32)
-        masks_q = np.zeros((n_questions,1,maxlen_questions),dtype=np.int8)
-        masks_c = np.zeros((n_questions,max_n_candidates,maxlen_candidates),dtype=np.int8)
+        combined = np.zeros((n_questions,max_n_candidates,maxlen_questions+1+maxlen_candidates+1),dtype=np.int32)
+        masks = np.zeros((n_questions,max_n_candidates,maxlen_questions+1+maxlen_candidates+1),dtype=np.int8)
+        only_candidate_mask = np.zeros(masks.shape)
         labels = np.zeros((n_questions,max_n_candidates),dtype=np.float32)
 
         for q_idx,q in enumerate(questions_split):
-            add_q(q.question, word2vocab, questions, masks_q, q_idx)
+            q_len = add_q(q, word2vocab, combined, masks,only_candidate_mask, q_idx)
             for c_idx, c in enumerate(q.answers):
-                add_c(c, word2vocab, candidates, masks_c, q_idx, c_idx)
+                add_c(c, word2vocab, combined, masks, only_candidate_mask, q_idx, c_idx, q_len)
                 labels[q_idx,c_idx] = (int(c_idx in q.correct_answer))
 
-        with open('./triggering/data/GN_' + question_set + '.npz', 'w') as f:
-            np.savez(f,questions=questions, candidates=candidates, masks_q=masks_q, masks_c=masks_c, labels=labels)
+        with open('./triggering/data/' + question_set + '_combined.npz', 'w') as f:
+            np.savez(f,combined=combined, masks=masks, only_candidate_mask=only_candidate_mask, labels=labels)
 
     print('Max Sentence Length: ' + str(maxlen_questions))
     print('Recognized Words: ' + str(vocab_size-unknown))
@@ -153,8 +109,6 @@ def find_maxes(questions_f):
         for q in questions_f[question_set]:
             if len(get_sentence_words(q.question)) > maxlen_questions:
                 maxlen_questions = len(get_sentence_words(q.question))
-                print(q.question)
-                print('\n')
             if len(q.answers) > max_n_candidates:
                 max_n_candidates = len(q.answers)
             for c in q.answers:
@@ -215,17 +169,41 @@ def load_questions_from_file(mode, q_limit, vocabulary=None):
             answers_count += 1
     return questions, vocabulary
 
-def add_q(s, word2vocab, questions, masks, idx):
-    sentence = get_sentence_words(s)
+def add_q(q, word2vocab, combined, masks,only_candidate_mask, q_idx):
+    sentence = get_sentence_words(q.question)
+    
+    # do not mask the the question for the first candidate
+    for i in xrange(len(sentence)+1):
+        only_candidate_mask[q_idx,0,i] = 1
 
-    for i,word in enumerate(sentence):
-        questions[idx,0,i] = word2vocab[re.sub("\d", "0", word.lower())]
-        masks[idx,0,i] = 1
+    for c_idx in xrange(len(q.answers)):
+        for i,word in enumerate(sentence):
+        # if word not in globals.p_marks:
+        # if globals.normalize_numbers is True:
+            #print("Extracting from word2vec word: %s" % re.sub("\d", "0", word))
+            combined[q_idx,c_idx,i] = word2vocab[re.sub("\d", "0", word.lower())]
+            masks[q_idx,c_idx,i] = 1
+        masks[q_idx,c_idx,i+1] = 1
+        combined[q_idx,c_idx,i+1] = 1
+    return len(sentence)+1
+        # else:
+            # questions[q_idx,0,i] = word2vocab[word.lower()]
 
-def add_c(s, word2vocab, candidates, masks, q_idx, c_idx):
+def add_c(s, word2vocab, combined, masks,only_candidate_mask, q_idx, c_idx, q_len):
     sentence = get_sentence_words(s)
     for i,word in enumerate(sentence):
-        candidates[q_idx,c_idx,i] = word2vocab[re.sub("\d", "0", word.lower())]
-        masks[q_idx,c_idx,i] = 1
+        # if word not in globals.p_marks:
+        # if globals.normalize_numbers is True:
+            #print("Extracting from word2vec word: %s" % re.sub("\d", "0", word))
+        combined[q_idx,c_idx,q_len+i] = word2vocab[re.sub("\d", "0", word.lower())]
+        masks[q_idx,c_idx,q_len+i] = 1
+        only_candidate_mask[q_idx,c_idx,q_len+i] = 1
+
+    masks[q_idx,c_idx,q_len+i+1] = 1
+    combined[q_idx,c_idx,q_len+i+1] = 1
+    only_candidate_mask[q_idx,c_idx,q_len+i+1] = 1
+
+        # else:
+        #     candidates[q_idx,c_idx,i] = word2vocab[word.lower()]
 if __name__ == '__main__':
     parse()
