@@ -111,12 +111,20 @@ def test_lr_on_data(X_train, y_train, X_validate, y_validate, X_test, y_test, ep
     predictions_test = lr.predict_proba(X_test)
     predictions_test = array([i[-1] for i in predictions_test])
 
+    f = open("y_test.pickle", "wb")
+    pickle.dump(y_test, f, protocol=2)
+    f.close()
+
+    f = open("y_predictions.pickle", "wb")
+    pickle.dump(predictions_test, f, protocol=2)
+    f.close()
+
     for thr in range(5, 15):
         thr /= 100.0
         precision_val, recall_val, f1_val = evaluate_with_threshold(
             y_validate, predictions_val, predictions_val, thr)
         precision_test, recall_test, f1_test = evaluate_with_threshold(
-            y_test, predictions_test, predictions_test, thr)
+            y_test, predictions_test, predictions_test, thr, True)
         res = ("epoch: %d, thre=%.2f" %(epoch, thr), precision_val, recall_val, f1_val,
                precision_test, recall_test, f1_test)
         results.append(res)
@@ -139,7 +147,12 @@ def test_model(model, X_test, y_test):
 
 def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
     y_train_flatted = list(itertools.chain(*y_train))
-    nb_batch = len(X_train)/batch_size + 1
+    nb_batch = len(X_train)/batch_size
+
+    if len(X_train) % batch_size != 0:
+        nb_batch += 1
+
+    print ("len X_train: %d, nb_batch: %d, batch_size: %d" % (len(X_train), nb_batch, batch_size))
 
     best_f1 = 0.0
     best_f1_index = 0
@@ -191,6 +204,7 @@ def train_and_test(X_train, y_train, X_validate, y_validate, X_test, y_test):
                                                              accuracy=True)
             progress_bar.add(batch_size, values=[("train loss", train_loss),("train accuracy:", train_accuracy)])
 
+        print ("After")
         # Now evaluate with logistic regression
         # Get predictions from NN
         predictions_train = prepare_predictions(X_train, model, add_logistic_weights=False)
@@ -359,11 +373,12 @@ def find_threshold(questions_gold_sets, predictions, confidence):
         return average_threshold
 
 
-def evaluate_with_threshold(questions_gold_sets, predictions, confidence, threshold):
+def evaluate_with_threshold(questions_gold_sets, predictions, confidence, threshold, is_test=False):
     index_begin = 0
     all_questions_with_answers = 0.0
     predicted_questions = 0.0
     correctly_predicted_questions = 0.0
+    q_answers = []
 
     for question_set in questions_gold_sets:
         # Get the slice from predictions and confidence for this question_set
@@ -396,8 +411,18 @@ def evaluate_with_threshold(questions_gold_sets, predictions, confidence, thresh
         # If the question predicted correctly, increment correctly_predicted_questions
         if predicted_answer > -1 and predicted_answer in gold_answer_ids:
             correctly_predicted_questions += 1
+            q_answers.append(1)
+        else:
+            q_answers.append(0)
 
         index_begin = index_end
+
+    # Store pickle with q_answers
+    if is_test == True:
+        print ("Dumping q_answer size of: %d" % len(q_answers))
+        f_pickle = open("q_answers_" + str(threshold) + ".pickle", "wb")
+        pickle.dump(q_answers, f_pickle, protocol=2)
+        f_pickle.close()
 
     # Calculate precision, recall and F1
     if correctly_predicted_questions == 0 or predicted_questions == 0:
