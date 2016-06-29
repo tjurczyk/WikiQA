@@ -68,6 +68,8 @@ class Word2VecModel:
         pickle.dump(self.word_vecs, w2v_file, protocol=2)
         w2v_file.close()
 
+        self.save_model_words()
+
     def save_model_words(self, filename="word2vec.words"):
         w2vw_file = open(globals.data_path + filename, "wb")
         self.word_ids = {}

@@ -30,7 +30,7 @@ def build_regular_model(embedding_layer_weights):
 
     # Convolution layer with its activation
     if embedding_layer_weights is not None:
-        model.add(Embedding(36983, 300, weights=[embedding_layer_weights,]))
+        model.add(Embedding(len(embedding_layer_weights), 300, weights=[embedding_layer_weights,]))
         model.add(Reshape((1, (globals.s_size*2)+1, globals.dimension)))
 
     model.add(Convolution2D(globals.nb_filters, 2, globals.dimension,
@@ -40,6 +40,7 @@ def build_regular_model(embedding_layer_weights):
     # Pooling
     #model.add(extras.AveragePooling2D(poolsize=(globals.s_size, 1)))
     model.add(MaxPooling2D(pool_size=(globals.s_size, 1)))
+
 
     # Flattening and Dense Layer
     model.add(Flatten())
